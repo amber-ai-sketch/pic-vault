@@ -195,12 +195,12 @@ cmd_init() {
 
 # === dedupe ===
 cmd_dedupe() {
-    local yes=""
-    [ "$1" = "--yes" ] && yes="--yes"
-    if [ -z "$yes" ]; then
+    local dry_run="--dry-run"
+    [ "$1" = "--yes" ] && dry_run=""
+    if [ -n "$dry_run" ]; then
         warn "Running in dry-run mode (no files moved). Use --yes to actually move duplicates."
     fi
-    python3 "$SCRIPTS_DIR/dedupe.py" --work "$WORK" $yes
+    python3 "$SCRIPTS_DIR/dedupe.py" --work "$WORK" $dry_run
 }
 
 # === rename ===
