@@ -83,6 +83,11 @@ Run `picvault help` for complete reference.
 
 Open `outputs/dashboard.html` in your browser, or run `picvault web start && picvault open`.
 
+⚠️ **First-time setup**: edit the three `PROJECT_ROOT` / `WORK` / `BACKUP` constants
+near the top of `outputs/dashboard.html` to match your local disk layout. The repo
+ships with placeholders (`/path/to/picvault`, `/Volumes/<work-disk>`, `/Volumes/<backup-disk>`)
+so nothing personal is hardcoded.
+
 The dashboard shows:
 - Live file counts (polls `/api/status` every 5s when Web UI is running)
 - One-click copy buttons for every command

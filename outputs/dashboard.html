@@ -248,14 +248,15 @@
 
 <script>
 // ============================================================
-// Static configuration (paths are baked-in; runs server-side via /api/run)
+// ⚠️  EDIT ME before first use: replace the three paths below
+//     with your local setup. See README → "Web UI" for details.
 // ============================================================
-const PROJECT_ROOT = '/Users/yumeng/Documents/PicVault';
-const WORK = '/Volumes/Storage';
-const BACKUP = '/Volumes/WD4T/MediaVault';
-const API_URL = 'http://localhost:8765/api/status';
-const RUN_URL = 'http://localhost:8765/api/run';
-const PICVAULT = PROJECT_ROOT + '/picvault';
+const PROJECT_ROOT = '/path/to/picvault';        // e.g. ~/code/PicVault
+const WORK         = '/Volumes/<work-disk>';     // your work disk root
+const BACKUP       = '/Volumes/<backup-disk>';   // your backup disk root
+const API_URL      = 'http://localhost:8765/api/status';
+const RUN_URL      = 'http://localhost:8765/api/run';
+const PICVAULT     = PROJECT_ROOT + '/picvault';
 
 // All command strings the dashboard shows. Args are absolute paths so
 // the user can paste them straight into a terminal without cd or PATH setup.
