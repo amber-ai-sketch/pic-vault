@@ -51,20 +51,29 @@ def find_ffmpeg() -> str:
     return path
 
 
-def build_filter_complex(clips: list, transition: str) -> tuple[str, str]:
-    """Build ffmpeg -filter_complex for concat with crossfade."""
+def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
+    """Build ffmpeg -filter_complex for trim/xfade/concat.
+
+    Returns (filter_str, video_label, audio_label) for:
+        ffmpeg -filter_complex <filter_str> -map <video_label> -map <audio_label>
+    """
     n = len(clips)
     if n == 0:
         raise ValueError("EDL has no clips")
-    if n == 1:
-        # Just trim
-        single = clips[0]
-        filter_str = f"[0:v]trim=start={single.get('in', 0)}:end={single['out']},setpts=PTS-STARTPTS[v];[0:a]atrim=start={single.get('in', 0)}:end={single['out']},asetpts=PTS-STARTPTS[a]"
-        return filter_str, "[v][a]"
 
-    # Multiple clips: use xfade filter
+    if n == 1:
+        # Single clip: just trim
+        c = clips[0]
+        in_t = c.get('in', 0)
+        out_t = c['out']
+        filter_str = (
+            f"[0:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v];"
+            f"[0:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a]"
+        )
+        return filter_str, "[v]", "[a]"
+
     if 'crossfade' in transition:
-        # Estimate fade duration from transition style
+        # Parse fade duration from style ("crossfade-1s" -> 1.0)
         fade_dur = 1.0
         if '-' in transition:
             try:
@@ -72,40 +81,52 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str]:
             except Exception:
                 fade_dur = 1.0
 
-        # Each input has trim applied first
+        # First pass: produce trimmed labels [v0][a0], [v1][a1], ...
         parts = []
-        last_v = last_a = None
-        offset = 0.0
         for i, c in enumerate(clips):
             in_t = c.get('in', 0)
             out_t = c['out']
+            parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
+            parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
+
+        # Second pass: chain xfade (video) + acrossfade (audio)
+        last_v = "[v0]"
+        last_a = "[a0]"
+        offset = clips[0]['out'] - clips[0].get('in', 0)
+        for i in range(1, n):
+            in_t = clips[i].get('in', 0)
+            out_t = clips[i]['out']
             dur = out_t - in_t
-            parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
-            parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
-            if i == 0:
-                last_v = f"[v{i}]"
-                last_a = f"[a{i}]"
-                offset = dur
-            else:
-                # xfade between previous and current
-                new_v = f"[v{i}_out]"
-                new_a = f"[a{i}_out]"
-                parts.append(f"{last_v}{last_a}{new_v}xfade=transition=fade:duration={fade_dur}:offset={offset - fade_dur}[xv{i}];{last_a}{new_a}acrossfade=d={fade_dur}[xa{i}]")
-                last_v = f"[xv{i}]"
-                last_a = f"[xa{i}]"
-                offset = offset + dur - fade_dur
+            v_in = f"[v{i}]"
+            a_in = f"[a{i}]"
+            xv_out = f"[xv{i}]"
+            xa_out = f"[xa{i}]"
+            # xfade takes 2 video inputs: [in0][in1]xfade=...[out]
+            parts.append(
+                f"{last_v}{v_in}xfade=transition=fade:duration={fade_dur}:offset={offset - fade_dur}{xv_out}"
+            )
+            # acrossfade takes 2 audio inputs
+            parts.append(
+                f"{last_a}{a_in}acrossfade=d={fade_dur}{xa_out}"
+            )
+            last_v = xv_out
+            last_a = xa_out
+            offset = offset + dur - fade_dur
+
         filter_str = ";" + chr(10) + "".join(parts)
-        return filter_str, f"{last_v}{last_a}"
-    else:
-        # Plain concat (no transition)
-        parts = []
-        for i, c in enumerate(clips):
-            in_t = c.get('in', 0)
-            out_t = c['out']
-            parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
-            parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
-        filter_str = ";" + chr(10) + "".join(parts) + ";" + chr(10) + "".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[v][a]"
-        return filter_str, "[v][a]"
+        return filter_str, last_v, last_a
+
+    # Plain concat (no transition)
+    parts = []
+    for i, c in enumerate(clips):
+        in_t = c.get('in', 0)
+        out_t = c['out']
+        parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
+        parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
+    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(n))
+    parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[v][a]")
+    filter_str = ";" + chr(10) + "".join(parts)
+    return filter_str, "[v]", "[a]"
 
 
 def main():
@@ -140,7 +161,7 @@ def main():
         sys.exit(1)
 
     transition = args.style
-    filter_str, map_arg = build_filter_complex(clips, transition)
+    filter_str, v_label, a_label = build_filter_complex(clips, transition)
 
     output_path = work / '_vlogs' / f"{args.theme}.mp4"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +171,8 @@ def main():
         cmd += ['-i', str(work / c['path'])]
     cmd += [
         '-filter_complex', filter_str,
-        '-map', map_arg.split('[')[0] + '[0]',  # simplistic; real ffmpeg needs proper mapping
+        '-map', v_label,
+        '-map', a_label,
         '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
