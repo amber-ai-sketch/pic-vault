@@ -1,0 +1,603 @@
+#!/bin/bash
+# picvault - Personal photo/video library CLI
+# Usage: picvault <subcommand> [args]
+# Run `picvault help` for full command list.
+
+set -e
+
+# ============================================================
+# Config
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+WORK="${WORK:-${PICVAULT_WORK:-/Volumes/Storage}}"
+CONFIG_FILE="${PICVAULT_CONFIG:-$HOME/.config/picvault/work}"
+[ -f "$CONFIG_FILE" ] && WORK="$(cat "$CONFIG_FILE")"
+
+# Path whitelist (sandbox)
+ALLOWED_PREFIXES=(
+    "/Volumes/Storage"
+    "/Volumes/WD4T/MediaVault"
+    "/Volumes/YM/MediaVault"
+)
+
+# Test bypass
+if [ "${PICVAULT_TEST:-}" = "1" ]; then
+    PICVAULT_SANDBOX_BYPASS=1
+fi
+
+# ============================================================
+# Colors
+# ============================================================
+if [ -t 1 ]; then
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    RED='\033[0;31m'
+    BLUE='\033[0;34m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+else
+    GREEN=''; YELLOW=''; RED=''; BLUE=''; BOLD=''; NC=''
+fi
+
+ok()    { echo -e "${GREEN}✓${NC} $*" >&2; }
+warn()  { echo -e "${YELLOW}⚠${NC}  $*" >&2; }
+err()   { echo -e "${RED}❌${NC} $*" >&2; }
+info()  { echo -e "${BLUE}ℹ${NC}  $*" >&2; }
+
+# ============================================================
+# Path sandbox
+# ============================================================
+check_path() {
+    local p="$1"
+    local kind="$2"
+    [ "${PICVAULT_SANDBOX_BYPASS:-0}" = "1" ] && return 0
+    for prefix in "${ALLOWED_PREFIXES[@]}"; do
+        if [[ "$p" == "$prefix" || "$p" == "$prefix"/* ]]; then
+            return 0
+        fi
+    done
+    err "--$kind $p is not in path whitelist"
+    err "  Allowed: ${ALLOWED_PREFIXES[*]}"
+    exit 1
+}
+
+check_path "$WORK" "work"
+
+# ============================================================
+# Helpers
+# ============================================================
+count_files() {
+    local dir="$1"
+    [ -d "$dir" ] || { echo 0; return; }
+    find "$dir" -type f -not -path "*/.DS_Store" 2>/dev/null | wc -l | tr -d ' '
+}
+
+count_starred() {
+    local dir="$1"
+    [ -d "$dir" ] || { echo 0; return; }
+    local count=0
+    for f in "$dir"/*.json; do
+        [ -f "$f" ] || continue
+        local n=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" "$f" 2>/dev/null || echo 0)
+        count=$((count + n))
+    done
+    echo $count
+}
+
+last_sync_time() {
+    local log_dir="$1"
+    [ -d "$log_dir" ] || { echo "never"; return; }
+    find "$log_dir" -name "sync-*.log" 2>/dev/null | sort -r | head -1
+}
+
+# ============================================================
+# Commands
+# ============================================================
+
+cmd_help() {
+    cat << 'HELP'
+picvault - Personal photo/video library CLI
+
+Usage:
+  picvault <command> [options]
+
+Status:
+  status                      Show file counts in inbox / by-date / _trash / etc.
+  status --watch              Refresh every 3s
+  web status                  Web UI status
+
+Main pipeline:
+  init [--with-example-themes]   Initialize work directory structure
+  dedupe [--yes]                 Find duplicates, move to _trash/
+  rename [--yes]                 Rename + organize (default dry-run)
+  sync [--verify] [--yes]        Mirror work → backup disk
+  pipeline [--yes]               dedupe + rename + sync in one go
+
+Web UI:
+  web start [--port 8765]       Start the Flask-free web browser (background)
+  web stop                      Stop the web browser
+  web restart                   Restart
+  web logs [--follow]           Show web UI logs
+  web open                      Open web UI in default browser
+
+Star / favorites:
+  star <bucket> <file>         Mark a file as starred (terminal-friendly)
+  unstar <bucket> <file>       Remove star
+  favorites                     List all stars per bucket
+
+Themes:
+  theme add                     Interactively add a theme to events.yaml
+  theme list                    List themes
+  theme remove <name>           Remove a theme
+
+Tools:
+  find <pattern>                Search filenames in by-date/
+  find --date YYYY-MM-DD        Show files from a specific date
+  log                           Tail latest pipeline log
+  doctor                        Check dependencies (python / ffmpeg / sips)
+  open                          Open web UI in browser
+  help                          This message
+
+Global options:
+  --work PATH                   Override work directory
+  PICVAULT_TEST=1               Sandbox bypass (for tests)
+
+Environment:
+  WORK                          Work directory (default: /Volumes/Storage)
+  PICVAULT_CONFIG               Path to file containing work directory
+HELP
+}
+
+# === status ===
+cmd_status() {
+    local watch="$1"
+    while true; do
+        local inbox=$(count_files "$WORK/inbox")
+        local by_date=$(count_files "$WORK/by-date")
+        local trash=$(count_files "$WORK/_trash")
+        local screenshots=$(count_files "$WORK/screenshots")
+        local vlogs=$(count_files "$WORK/_vlogs")
+        local stars=$(count_starred "$WORK/_meta/stars")
+        local last_sync=$(last_sync_time "$WORK/_meta/logs")
+
+        echo ""
+        echo -e "${BOLD}📊 PicVault Status${NC}  ${BLUE}$WORK${NC}"
+        echo "─────────────────────────────────────────"
+        printf "  inbox:        %6d files\n" "$inbox"
+        printf "  by-date:      %6d files\n" "$by_date"
+        printf "  screenshots:  %6d files\n" "$screenshots"
+        printf "  _vlogs:       %6d files\n" "$vlogs"
+        printf "  _trash:       %6d files\n" "$trash"
+        printf "  _favorite:    %6d stars\n"  "$stars"
+        echo "─────────────────────────────────────────"
+        echo "  Last sync log: $last_sync"
+
+        local web_pid_file="$WORK/_meta/web.pid"
+        if [ -f "$web_pid_file" ] && kill -0 "$(cat "$web_pid_file")" 2>/dev/null; then
+            echo -e "  Web UI:        ${GREEN}running${NC} (pid $(cat "$web_pid_file")) http://localhost:8765/"
+        else
+            echo -e "  Web UI:        ${YELLOW}not running${NC}  →  picvault web start"
+        fi
+
+        [ "$watch" = "--watch" ] || break
+        sleep 3
+    done
+    echo ""
+}
+
+# === init ===
+cmd_init() {
+    local with_examples=""
+    [ "$1" = "--with-example-themes" ] && with_examples="--with-example-themes"
+    bash "$SCRIPTS_DIR/init_storage.sh" --work "$WORK" $with_examples
+}
+
+# === dedupe ===
+cmd_dedupe() {
+    local yes=""
+    [ "$1" = "--yes" ] && yes="--yes"
+    if [ -z "$yes" ]; then
+        warn "Running in dry-run mode (no files moved). Use --yes to actually move duplicates."
+    fi
+    python3 "$SCRIPTS_DIR/dedupe.py" --work "$WORK" $yes
+}
+
+# === rename ===
+cmd_rename() {
+    local yes=""
+    [ "$1" = "--yes" ] && yes="--yes"
+    if [ -z "$yes" ]; then
+        warn "Running in dry-run mode. Use --yes to actually move files."
+        python3 "$SCRIPTS_DIR/rename_organize.py" --work "$WORK" --dry-run
+    else
+        python3 "$SCRIPTS_DIR/rename_organize.py" --work "$WORK"
+    fi
+}
+
+# === sync ===
+cmd_sync() {
+    local verify=""
+    local yes=""
+    [ "$1" = "--verify" ] && { verify="--verify"; shift; }
+    [ "$1" = "--yes" ] && yes="--yes"
+    if [ -z "$yes" ]; then
+        warn "Running in dry-run mode. Use --yes to actually sync."
+        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "/Volumes/WD4T/MediaVault" --dry-run
+    else
+        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "/Volumes/WD4T/MediaVault" $verify
+    fi
+}
+
+# === pipeline ===
+cmd_pipeline() {
+    local yes=""
+    [ "$1" = "--yes" ] && yes="--yes"
+    info "Starting full pipeline..."
+    cmd_dedupe $yes
+    cmd_rename $yes
+    cmd_sync $yes
+    ok "Pipeline complete"
+}
+
+# === web ===
+cmd_web() {
+    local action="$1"
+    shift
+    local port="8765"
+    local follow=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) port="$2"; shift 2 ;;
+            --follow|-f) follow="--follow"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local pid_file="$WORK/_meta/web.pid"
+    local log_file="$WORK/_meta/logs/web.log"
+
+    case "$action" in
+        start)
+            # Ensure dirs exist
+            mkdir -p "$WORK/_meta/logs" "$WORK/_meta/thumbs"
+            if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+                warn "Web UI already running (pid $(cat "$pid_file"))"
+                return
+            fi
+            nohup python3 "$SCRIPTS_DIR/web_browse.py" \
+                --work "$WORK" --host 0.0.0.0 --port "$port" \
+                > "$log_file" 2>&1 &
+            echo $! > "$pid_file"
+            sleep 1
+            if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+                ok "Web UI started (pid $(cat "$pid_file"))"
+                info "Open: http://localhost:$port/"
+            else
+                err "Web UI failed to start. Check: tail $log_file"
+            fi
+            ;;
+        stop)
+            if [ ! -f "$pid_file" ]; then
+                warn "Web UI not running (no pid file)"
+                return
+            fi
+            local pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid"
+                ok "Web UI stopped (pid $pid)"
+            else
+                warn "Web UI process not running (stale pid file)"
+            fi
+            rm -f "$pid_file"
+            ;;
+        restart)
+            cmd_web stop
+            sleep 1
+            cmd_web start --port "$port"
+            ;;
+        status)
+            if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+                ok "Web UI running (pid $(cat "$pid_file"))"
+                info "URL: http://localhost:$port/"
+            else
+                warn "Web UI not running"
+            fi
+            ;;
+        logs)
+            [ -f "$log_file" ] || { err "No log file: $log_file"; return; }
+            if [ "$follow" = "--follow" ]; then
+                tail -f "$log_file"
+            else
+                tail -50 "$log_file"
+            fi
+            ;;
+        open)
+            url="http://localhost:$port/"
+            open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "Open manually: $url"
+            ;;
+        *)
+            err "Unknown web action: $action"
+            info "Try: picvault web {start|stop|restart|status|logs|open}"
+            return 1
+            ;;
+    esac
+}
+
+# === star / unstar ===
+cmd_star() {
+    local bucket="$1"
+    local file="$2"
+    if [ -z "$bucket" ] || [ -z "$file" ]; then
+        err "Usage: picvault star <bucket> <file>"
+        return 1
+    fi
+    local stars_file="$WORK/_meta/stars/${bucket}.json"
+    mkdir -p "$(dirname "$stars_file")"
+    if [ ! -f "$stars_file" ]; then
+        echo "{}" > "$stars_file"
+    fi
+    python3 -c "
+import json, sys
+p = sys.argv[1]
+with open(p) as f: stars = json.load(f)
+stars[sys.argv[2]] = True
+with open(p, 'w') as f: json.dump(stars, f, indent=2, ensure_ascii=False)
+" "$stars_file" "$file"
+    ok "Starred: $file → $bucket"
+}
+
+cmd_unstar() {
+    local bucket="$1"
+    local file="$2"
+    if [ -z "$bucket" ] || [ -z "$file" ]; then
+        err "Usage: picvault unstar <bucket> <file>"
+        return 1
+    fi
+    local stars_file="$WORK/_meta/stars/${bucket}.json"
+    [ -f "$stars_file" ] || { warn "No stars for $bucket"; return; }
+    python3 -c "
+import json, sys
+p = sys.argv[1]
+with open(p) as f: stars = json.load(f)
+stars.pop(sys.argv[2], None)
+with open(p, 'w') as f: json.dump(stars, f, indent=2, ensure_ascii=False)
+" "$stars_file" "$file"
+    ok "Unstarred: $file"
+}
+
+cmd_favorites() {
+    echo ""
+    echo -e "${BOLD}★ Favorites${NC}"
+    echo "─────────────────────────────────────────"
+    local total=0
+    for f in "$WORK/_meta/stars/"*.json; do
+        [ -f "$f" ] || continue
+        local bucket=$(basename "$f" .json)
+        local n=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" "$f" 2>/dev/null || echo 0)
+        printf "  %-30s %3d stars\n" "$bucket" "$n"
+        total=$((total + n))
+    done
+    echo "─────────────────────────────────────────"
+    echo "  Total: $total"
+    echo ""
+}
+
+# === theme ===
+cmd_theme() {
+    local action="$1"
+    shift
+    case "$action" in
+        add)
+            python3 "$SCRIPTS_DIR/add_theme.py" --work "$WORK" --interactive
+            ;;
+        list)
+            local events="$WORK/_meta/events.yaml"
+            if [ ! -f "$events" ]; then
+                warn "No events.yaml"
+                return
+            fi
+            echo ""
+            echo -e "${BOLD}Themes${NC}"
+            echo "─────────────────────────────────────────"
+            python3 -c "
+import yaml, sys
+try:
+    with open(sys.argv[1]) as f: data = yaml.safe_load(f) or {}
+    for t in data.get('themes', []):
+        print(f'  {t.get(\"name\", \"?\"):20s}  {t.get(\"month\", \"?\")}  sources={t.get(\"sources\", [])}')
+except Exception as e:
+    print(f'  (parse error: {e})')
+" "$events" 2>/dev/null || grep -A 2 "name:" "$events" | head -40
+            echo ""
+            ;;
+        remove)
+            local name="$1"
+            [ -z "$name" ] && { err "Usage: picvault theme remove <name>"; return 1; }
+            local events="$WORK/_meta/events.yaml"
+            [ -f "$events" ] || { warn "No events.yaml"; return; }
+            python3 -c "
+import yaml, sys
+p = sys.argv[1]
+n = sys.argv[2]
+with open(p) as f: data = yaml.safe_load(f) or {}
+data['themes'] = [t for t in data.get('themes', []) if t.get('name') != n]
+with open(p, 'w') as f: yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+" "$events" "$name"
+            ok "Removed theme: $name"
+            ;;
+        *)
+            err "Usage: picvault theme {add|list|remove <name>}"
+            ;;
+    esac
+}
+
+# === find ===
+cmd_find() {
+    local pattern="$1"
+    shift
+    local date_filter=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --date) date_filter="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [ -n "$date_filter" ]; then
+        local y=${date_filter:0:4}
+        local m=${date_filter:5:2}
+        local d=${date_filter:8:2}
+        local target="$WORK/by-date/$y/$y-$m/$y-$m-$d"
+        if [ -d "$target" ]; then
+            info "Files in $target:"
+            find "$target" -type f 2>/dev/null | head -100
+        else
+            warn "No such date: $target"
+        fi
+    elif [ -n "$pattern" ]; then
+        info "Searching for '$pattern' in by-date/ ..."
+        find "$WORK/by-date" -name "*${pattern}*" -type f 2>/dev/null | head -50
+    else
+        err "Usage: picvault find <pattern>  OR  picvault find --date YYYY-MM-DD"
+    fi
+}
+
+# === log ===
+cmd_log() {
+    local latest=$(ls -t "$WORK/_meta/logs/"*.log 2>/dev/null | head -1)
+    if [ -z "$latest" ]; then
+        warn "No logs in $WORK/_meta/logs/"
+        return
+    fi
+    info "Tailing $latest"
+    tail -50 "$latest"
+}
+
+# === doctor ===
+cmd_doctor() {
+    echo ""
+    echo -e "${BOLD}🔍 PicVault Doctor${NC}"
+    echo "─────────────────────────────────────────"
+    
+    # Python
+    if command -v python3 >/dev/null 2>&1; then
+        local py=$(python3 --version 2>&1)
+        ok "Python: $py"
+    else
+        err "Python 3 not found"
+    fi
+    
+    # PIL
+    if python3 -c "import PIL" 2>/dev/null; then
+        ok "PIL: $(python3 -c 'import PIL; print(PIL.__version__)')"
+    else
+        err "PIL not installed (pip3 install --user Pillow)"
+    fi
+    
+    # ffmpeg
+    if command -v ffmpeg >/dev/null 2>&1; then
+        ok "ffmpeg: $(ffmpeg -version 2>&1 | head -1 | cut -d' ' -f3)"
+    else
+        err "ffmpeg not found (brew install ffmpeg)"
+    fi
+    
+    # ffprobe
+    if command -v ffprobe >/dev/null 2>&1; then
+        ok "ffprobe: $(ffprobe -version 2>&1 | head -1 | cut -d' ' -f3)"
+    else
+        err "ffprobe not found"
+    fi
+    
+    # sips (macOS only)
+    if command -v sips >/dev/null 2>&1; then
+        ok "sips: $(sips --version 2>&1 | head -1)"
+    else
+        warn "sips not found (macOS only — needed for Web UI thumbnails)"
+    fi
+    
+    # Work directory
+    if [ -d "$WORK" ]; then
+        ok "Work directory: $WORK (writable: $([ -w "$WORK" ] && echo yes || echo NO))"
+    else
+        err "Work directory does not exist: $WORK"
+    fi
+    
+    # Backup directory
+    if [ -d "/Volumes/WD4T/MediaVault" ]; then
+        ok "Backup directory: /Volumes/WD4T/MediaVault"
+    else
+        warn "Backup directory not mounted: /Volumes/WD4T/MediaVault"
+    fi
+    
+    echo "─────────────────────────────────────────"
+    echo ""
+}
+
+# === main ===
+main() {
+    if [ $# -eq 0 ]; then
+        cmd_help
+        return
+    fi
+    
+    local cmd="$1"
+    shift
+    
+    case "$cmd" in
+        help|-h|--help)
+            cmd_help
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        init)
+            cmd_init "$@"
+            ;;
+        dedupe)
+            cmd_dedupe "$@"
+            ;;
+        rename)
+            cmd_rename "$@"
+            ;;
+        sync)
+            cmd_sync "$@"
+            ;;
+        pipeline)
+            cmd_pipeline "$@"
+            ;;
+        web)
+            cmd_web "$@"
+            ;;
+        star)
+            cmd_star "$@"
+            ;;
+        unstar)
+            cmd_unstar "$@"
+            ;;
+        favorites)
+            cmd_favorites
+            ;;
+        theme)
+            cmd_theme "$@"
+            ;;
+        find)
+            cmd_find "$@"
+            ;;
+        log)
+            cmd_log
+            ;;
+        doctor)
+            cmd_doctor
+            ;;
+        open)
+            cmd_web open
+            ;;
+        *)
+            err "Unknown command: $cmd"
+            info "Run 'picvault help' for usage"
+            return 1
+            ;;
+    esac
+}
+
+main "$@"

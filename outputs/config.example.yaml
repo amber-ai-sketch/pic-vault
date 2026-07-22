@@ -1,0 +1,276 @@
+# PicVault 配置文件示例
+# 复制本文件为 config.yaml 后按需修改
+
+# ============================================================
+# 路径配置（脚本严格只读写这三个路径）
+# ============================================================
+paths:
+  # 工作盘：日常写入和处理
+  work: /Volumes/Storage
+
+  # 备份盘：rsync 镜像目标，外层其他内容不动
+  backup: /Volumes/WD4T/MediaVault
+
+  # 迁移 SSD：首次启动 onboarding 用
+  migration_ssd: /Volumes/YM/MediaVault
+  migration_backup_dir: _pre_migration_backup   # SSD 上的留底目录（用户手动放置数据）
+  migration_work_dir: working                  # SSD 上的工作目录（脚本创建）
+
+  # 临时文件（系统目录）
+  tmp_dir_prefix: /tmp/PicVault-
+
+# ============================================================
+# 路径白名单校验（启动时强制）
+# ============================================================
+sandbox:
+  # 不允许落入白名单的目录
+  deny_path_prefixes:
+    - /Volumes/WD4T/        # WD4T 除 MediaVault/ 之外的内容
+    - $HOME                  # 用户家目录
+    - /etc
+    - /usr
+    - /var
+    - /System
+    - /private/var
+
+# ============================================================
+# 源白名单 + EXIF Make 映射
+# ============================================================
+sources:
+  # 允许的 source 名字
+  whitelist:
+    - iphone
+    - samsung
+    - xiaomi
+    - huawei
+    - oppo
+    - vivo
+    - oneplus
+    - google
+    - canon
+    - canon-a
+    - canon-b
+    - nikon
+    - nikon-a
+    - sony
+    - sony-a
+    - fuji
+    - fuji-a
+    - ricoh-gr
+    - ricoh-gr2
+    - dji
+    - dji-nano
+    - dji-action
+    - dji-pocket
+    - dji-osmo
+    - gopro
+
+  # EXIF Make 字符串 → source 名字（小写匹配）
+  exif_make_map:
+    Apple: iphone
+    SAMSUNG: samsung
+    samsung: samsung
+    Xiaomi: xiaomi
+    HUAWEI: huawei
+    OPPO: oppo
+    vivo: vivo
+    OnePlus: oneplus
+    Google: google
+    Canon: canon
+    "NIKON CORPORATION": nikon
+    NIKON: nikon
+    SONY: sony
+    FUJIFILM: fuji
+    "RICOH IMAGING COMPANY, LTD.": ricoh-gr
+    DJI: dji
+    GoPro: gopro
+
+  # 源未识别时文件名的处理：omit=省略 source 段 / unknown=写 unknown
+  unhandled: omit
+
+# ============================================================
+# 去重配置
+# ============================================================
+dedupe:
+  # 用 SHA-256 还是更快但碰撞概率略高的 SHA-1
+  algorithm: sha256
+
+  # 保留策略：hash 冲突时保留哪个
+  # first_seen: 先见到的保留
+  # largest_file: 同名/同格式时保留体积大的
+  # preferred_source: 来源白名单中靠前的优先
+  keep_strategy: largest_file
+
+  # _trash/ 保留天数（之后人工清理）
+  trash_retention_days: 30
+
+  # 排除的文件扩展名（不入 dedupe 也不归档）
+  exclude_extensions:
+    - .DS_Store
+    - .Thumbs.db
+    - .tmp
+    - .part
+
+# ============================================================
+# 重命名 + 归档配置
+# ============================================================
+naming:
+  # 文件名格式模板
+  # 可用占位符: {date}, {source?}, {hash}
+  template: "{date}_{source?}_{hash}.ext"
+
+  # 日期格式
+  date_format: "%Y%m%d_%H%M%S"
+
+  # 日期提取优先级
+  date_priority:
+    - exif_datetime_original    # 照片 EXIF
+    - video_creation_time      # 视频 container metadata
+    - file_mtime               # 都没有就回退 mtime
+
+  # hash 前缀长度（建议 4-6 位）
+  hash_length: 4
+
+  # 目标同名时的处理
+  # suffix: 追加 _1 _2 ...
+  # overwrite: 覆盖（仅当 hash 完全一致才覆盖）
+  collision_strategy: suffix
+
+# ============================================================
+# 文件夹结构配置
+# ============================================================
+folders:
+  # by-date 桶的层级
+  by_date_layout: "by-date/{year}/{year}-{month:02d}"   # 2026/2026-07
+  # 主题桶的命名：<month>_<theme>
+  theme_separator: "_"
+  # 桶下分类
+  bucket_subdirs: [photos, videos]
+
+# ============================================================
+# 截图/录屏检测配置（v4 加录屏关键字）
+# ============================================================
+screenshot_detection:
+  enabled: true
+  
+  # 文件名关键字列表（任一匹配即识别为截图/录屏）
+  # 大小写不敏感、子串匹配
+  keywords:
+    - screenshot            # iPhone/Android 截图
+    - screenrecording       # macOS/iOS 录屏
+    - "screen recording"    # 带空格
+    - screenrecord          # Android 内置录屏
+    - screenrecorder        # 第三方 Android 录屏 app
+    - screencapture         # Linux 工具
+    - "screen capture"      # 带空格
+    - rpreplay              # iOS 控制中心录屏默认前缀
+  
+  output_dir: screenshots        # 归档根目录
+  
+  # GPS 启发式（v3 引入）
+  # 规则: 无 EXIF GPS + 无镜头厂商信息 → 判为截图/录屏
+  no_gps_as_screenshot: true     # 默认 true；误判多可改 false
+  
+  # 命名模板（统一加 screenshot_ 前缀）
+  naming_template: "screenshot_{date}_{source?}_{hash}.ext"
+
+# ============================================================
+# 命名配置
+# ============================================================
+naming:
+  photo_template:        "{date}_{source?}_{hash}.ext"
+  screenshot_template:   "screenshot_{date}_{source?}_{hash}.ext"
+
+# ============================================================
+# rsync 镜像配置
+# ============================================================
+sync:
+  # 镜像哪些子目录（白名单）
+  include_paths:
+    - by-date
+    - screenshots
+    - _favorite
+    - _vlogs
+
+  # 排除
+  exclude_paths:
+    - inbox
+    - _trash
+    - _meta
+
+  # 是否默认带 --delete
+  # append-only: 默认不带，4T 只增不减
+  # mirror: 带 --delete（需 --prune --confirm 显式触发）
+  default_mode: append-only
+
+# ============================================================
+# Web 浏览（web_browse.py）
+# ============================================================
+web_browse:
+  # 监听地址
+  host: 0.0.0.0
+  port: 8765
+
+  # 缩略图缓存目录（相对 --work）
+  thumb_cache: _meta/thumbs
+
+  # 缩略图尺寸
+  thumb_size: 320
+
+  # 默认排序
+  default_sort: capture    # capture | mtime | name
+
+  # 缩略图生成工具
+  # sips: macOS 内置（推荐）
+  # pil: Python PIL（HEIC 支持有限）
+  thumb_tool: sips
+
+# ============================================================
+# AppleScript / Photos 集成配置
+# ============================================================
+apple_script:
+  # Photos 是否自动跳过重复（Photos 5+ 支持）
+  skip_duplicates: true
+
+  # 是否自动打 favorite（iOS 星标）
+  mark_favorite: true
+
+  # 无主题精选相簿名
+  picks_album_name: Picks
+
+  # 导入前等待 Photos 完成导入的轮询超时（秒）
+  import_poll_timeout: 60
+
+  # 导入失败重试次数
+  import_retry: 3
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging:
+  # 日志目录（相对 --work）
+  log_dir: _meta/logs
+
+  # 单个日志文件最大大小（MB）
+  max_log_size_mb: 10
+
+  # 保留几天的日志
+  log_retention_days: 90
+
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  level: INFO
+
+# ============================================================
+# 主题管理（运行时由 add_theme.py 写）
+# ============================================================
+themes_file: _meta/events.yaml
+
+# ============================================================
+# 验收钩子（CI/单测用）
+# ============================================================
+testing:
+  # 强制路径沙箱（即使非生产环境也校验）
+  enforce_sandbox: true
+
+  # fixture 目录
+  fixtures_dir: scripts/tests/fixtures

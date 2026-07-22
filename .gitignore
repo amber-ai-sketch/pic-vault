@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Local config
+config.yaml
+config.local.yaml
+
+# Test artifacts (created at runtime by run_tests.py)
+/tmp/PicVault_test/
+
+# Work area (personal data, never committed)
+/work/inbox/
+/work/_meta/logs/*.log
+/work/_meta/web.pid
