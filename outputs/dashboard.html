@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PicVault - 个人照片视频整理方案</title>
+<title>PicVault — 控制面板</title>
 <style>
   :root {
     --bg: #fafafa;
@@ -16,187 +16,93 @@
     --red: #c62828;
     --border: #e0e0e0;
     --code-bg: #f5f5f5;
+    --danger-bg: #fff5f5;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1e1e1e;
-      --card: #2a2a2a;
-      --text: #e0e0e0;
-      --muted: #888;
-      --accent: #4ea3ff;
-      --border: #3a3a3a;
-      --code-bg: #1a1a1a;
+      --bg: #1e1e1e; --card: #2a2a2a; --text: #e0e0e0; --muted: #888;
+      --accent: #4ea3ff; --border: #3a3a3a; --code-bg: #1a1a1a;
+      --danger-bg: #3a2020;
     }
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    padding: 0;
+    margin: 0; padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
+    background: var(--bg); color: var(--text); line-height: 1.5;
   }
   header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
+    background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px;
   }
-  header h1 {
-    margin: 0;
-    font-size: 22px;
-  }
-  .web-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    color: var(--muted);
-  }
-  .web-status .dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    display: inline-block;
-  }
+  header h1 { margin: 0; font-size: 22px; }
+  .web-status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .web-status .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .web-status .dot.running { background: var(--green); }
   .web-status .dot.stopped { background: var(--muted); }
   .container {
-    display: grid;
-    grid-template-columns: 280px 1fr 240px;
-    gap: 16px;
-    padding: 16px;
-    max-width: 1400px;
-    margin: 0 auto;
+    display: grid; grid-template-columns: 320px 1fr;
+    gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto;
   }
-  @media (max-width: 1000px) {
-    .container { grid-template-columns: 1fr; }
-  }
+  @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
   .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
   }
-  .card h2 {
-    margin: 0 0 12px;
-    font-size: 16px;
-    font-weight: 600;
-  }
-  .stat {
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 0;
-    font-size: 14px;
-  }
+  .card h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+  .stat { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
   .stat .label { color: var(--muted); }
   .stat .value { font-weight: 600; font-family: ui-monospace, "SF Mono", monospace; }
   .step {
-    margin-bottom: 14px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
+    margin-bottom: 14px; padding: 12px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
   }
-  .step .step-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
+  .step .step-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .step .step-num {
-    background: var(--accent);
-    color: #fff;
-    width: 22px; height: 22px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 600;
-    flex-shrink: 0;
+    background: var(--accent); color: #fff; width: 22px; height: 22px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600; flex-shrink: 0;
   }
   .step .step-title { font-weight: 600; font-size: 14px; }
-  .cmd-row {
-    display: flex;
-    align-items: stretch;
-    gap: 4px;
-    margin-top: 6px;
+  .step .step-desc { font-size: 13px; color: var(--muted); margin: 4px 0 8px 30px; }
+  code.cmd {
+    display: block; background: var(--code-bg); padding: 8px 10px;
+    border-radius: 4px; font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+    font-size: 12px; overflow-x: auto; white-space: pre; word-break: break-all;
   }
-  code {
-    flex: 1;
-    background: var(--code-bg);
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-family: ui-monospace, "SF Mono", "Menlo", monospace;
-    font-size: 12px;
-    overflow-x: auto;
-    white-space: pre;
-  }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   button {
-    border: 1px solid var(--border);
-    background: var(--card);
-    color: var(--text);
-    padding: 4px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: inherit;
-    transition: all 0.15s;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    font-family: inherit; transition: all 0.15s;
   }
-  button:hover {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-  button.copied {
-    background: var(--green);
-    color: #fff;
-    border-color: var(--green);
-  }
-  button.danger:hover {
-    background: var(--red);
-    border-color: var(--red);
-  }
-  button.success:hover {
-    background: var(--green);
-    border-color: var(--green);
-  }
-  .row {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+  button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.copied { background: var(--green); color: #fff; border-color: var(--green); }
+  button.danger:hover { background: var(--red); border-color: var(--red); }
+  button.success:hover { background: var(--green); border-color: var(--green); }
   .tip {
-    background: var(--code-bg);
-    border-left: 3px solid var(--accent);
-    padding: 8px 12px;
-    margin: 8px 0;
-    font-size: 13px;
+    background: var(--code-bg); border-left: 3px solid var(--accent);
+    padding: 8px 12px; margin: 8px 0; font-size: 13px;
     border-radius: 0 4px 4px 0;
   }
-  .tip.warn {
-    border-left-color: var(--yellow);
+  .tip.warn { border-left-color: var(--yellow); background: var(--code-bg); }
+  .tip.danger { border-left-color: var(--red); background: var(--danger-bg); }
+  #outputPanel { display: none; }
+  #outputPanel .output-meta {
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    font-family: ui-monospace, "SF Mono", monospace;
   }
-  .tip.danger {
-    border-left-color: var(--red);
+  #outputPanel pre {
+    background: var(--code-bg); padding: 10px; border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", monospace; font-size: 12px;
+    overflow-x: auto; max-height: 400px; overflow-y: auto; white-space: pre-wrap;
+    margin: 4px 0;
   }
-  .refresh-btn {
-    margin-top: 12px;
-    width: 100%;
-  }
-  footer {
-    text-align: center;
-    padding: 20px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  #outputPanel pre.stderr { border-left: 3px solid var(--red); }
+  #outputPanel .ok { color: var(--green); font-weight: 600; }
+  #outputPanel .err { color: var(--red); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -212,119 +118,255 @@
 
 <div class="container">
 
-  <!-- 状态面板 -->
-  <div class="card">
-    <h2>📊 状态</h2>
-    <div class="stat"><span class="label">inbox</span><span class="value" id="inbox">–</span></div>
-    <div class="stat"><span class="label">by-date</span><span class="value" id="byDate">–</span></div>
-    <div class="stat"><span class="label">screenshots</span><span class="value" id="screenshots">–</span></div>
-    <div class="stat"><span class="label">_vlogs</span><span class="value" id="vlogs">–</span></div>
-    <div class="stat"><span class="label">_trash</span><span class="value" id="trash">–</span></div>
-    <div class="stat"><span class="label">_favorite ⭐</span><span class="value" id="starred">–</span></div>
-    <div class="tip warn" id="webHint" style="display:none">
-      💡 Web UI 未运行。点击下方 "启动 Web UI" 按钮，会自动复制启动命令。
+  <!-- 左：状态 + 启动提示 -->
+  <div>
+    <div class="card" id="webNotRunningCard" style="display:none">
+      <h2>⚠ Web UI 未启动</h2>
+      <div class="tip danger">
+        状态面板为空、Run 按钮无效都是因为 Web UI 没跑。<br>
+        请在终端执行（一行）：
+      </div>
+      <code class="cmd" id="startCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('startCmd')">📋 复制启动命令</button>
+      </div>
+      <div class="tip warn" style="margin-top:12px">
+        跑完后本页面会自动检测到 Web UI 已启动（最多 5 秒），状态面板会自动刷新。
+      </div>
     </div>
-    <button class="refresh-btn" onclick="pollStatus()">🔄 刷新</button>
+
+    <div class="card">
+      <h2>📊 状态</h2>
+      <div class="stat"><span class="label">inbox</span><span class="value" id="inbox">–</span></div>
+      <div class="stat"><span class="label">by-date</span><span class="value" id="byDate">–</span></div>
+      <div class="stat"><span class="label">screenshots</span><span class="value" id="screenshots">–</span></div>
+      <div class="stat"><span class="label">vlogs</span><span class="value" id="vlogs">–</span></div>
+      <div class="stat"><span class="label">trash</span><span class="value" id="trash">–</span></div>
+      <div class="stat"><span class="label">starred</span><span class="value" id="starred">–</span></div>
+      <div class="stat"><span class="label">last sync</span><span class="value" id="lastSync">–</span></div>
+      <div class="btn-row">
+        <button onclick="pollStatus()">🔄 手动刷新</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>💡 提示</h2>
+      <div class="tip">每条命令旁都展示<strong>绝对路径</strong>，复制后直接贴终端即可，不用 cd 也不用配 PATH。</div>
+      <div class="tip">无破坏性的操作有 <strong>▶ Run</strong> 按钮直接跑；会动文件的操作（dedupe --yes、rename --yes、sync --yes、pipeline --yes）点 Run 前会弹确认。</div>
+      <div class="tip warn">首次跑前建议先 <strong>▶ Dry-run</strong> 看输出。</div>
+      <div class="tip">状态每 5 秒自动刷新；点 Run 后成功后也会立即刷新。</div>
+    </div>
   </div>
 
-  <!-- 主操作 -->
-  <div class="card">
-    <h2>🚀 常用操作</h2>
+  <!-- 右：6 步流程 -->
+  <div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">1</span>
-        <span class="step-title">把文件拖到 inbox</span>
+        <span class="step-title">把照片/视频拖到 inbox</span>
       </div>
-      <div class="tip">Finder 打开 <code>/Volumes/Storage/inbox/</code>，把要整理的照片视频拖进去</div>
+      <div class="step-desc">手动拖到 <code id="inboxPath"></code>，子目录随意。无需命令。</div>
     </div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">2</span>
-        <span class="step-title">去重</span>
+        <span class="step-title">去重（SHA-256 字节级）</span>
       </div>
-      <div class="cmd-row">
-        <code>picvault dedupe --yes</code>
-        <button onclick="copyCmd(this, 'picvault dedupe --yes')">📋 复制</button>
+      <code class="cmd" id="dedupeDryCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('dedupeDryCmd')">📋 复制</button>
+        <button onclick="runCommand(this, 'dedupe_dry')">▶ Dry-run</button>
+        <button class="danger" onclick="runApply(this, 'dedupe_apply', '把 inbox 里所有 SHA-256 重复的文件移入 _trash/，保留最大的一份。继续？')">⚠ Apply（动文件）</button>
       </div>
     </div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">3</span>
-        <span class="step-title">重命名归档（默认 dry-run）</span>
+        <span class="step-title">重命名 + 归档到 by-date/</span>
       </div>
-      <div class="row">
-        <button onclick="copyCmd(this, 'picvault rename')">复制 dry-run</button>
-        <button class="success" onclick="copyCmd(this, 'picvault rename --yes')">复制 --yes 真跑</button>
+      <code class="cmd" id="renameDryCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('renameDryCmd')">📋 复制</button>
+        <button onclick="runCommand(this, 'rename_dry')">▶ Dry-run</button>
+        <button class="danger" onclick="runApply(this, 'rename_apply', '把 inbox 里的文件重命名 + 移到 by-date/YYYY/MM/[/theme]/。继续？')">⚠ Apply（动文件）</button>
       </div>
     </div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">4</span>
-        <span class="step-title">同步到 WD4T 备份盘</span>
+        <span class="step-title">同步到 WD4T 备份盘（rsync）</span>
       </div>
-      <div class="row">
-        <button onclick="copyCmd(this, 'picvault sync --verify')">复制 dry-run</button>
-        <button class="success" onclick="copyCmd(this, 'picvault sync --verify --yes')">复制 --yes 真同步</button>
+      <code class="cmd" id="syncVerifyCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('syncVerifyCmd')">📋 复制</button>
+        <button onclick="runCommand(this, 'sync_verify')">▶ Dry-run</button>
+        <button class="danger" onclick="runApply(this, 'sync_apply', '把工作盘 rsync 镜像到备份盘 /Volumes/WD4T/MediaVault。继续？')">⚠ Apply（动文件）</button>
       </div>
     </div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">5</span>
-        <span class="step-title">启动 Web UI 浏览整理结果</span>
+        <span class="step-title">启动 Web UI 浏览（用于加星标）</span>
       </div>
-      <div class="row">
-        <button onclick="copyCmd(this, 'picvault web start')">▶ 复制启动命令</button>
-        <button class="danger" onclick="copyCmd(this, 'picvault web stop')">■ 复制停止命令</button>
+      <code class="cmd" id="webStartCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('webStartCmd')">📋 复制</button>
+        <button onclick="runCommand(this, 'web_start')">▶ Run</button>
+        <button class="danger" onclick="runCommand(this, 'web_stop')">■ Stop</button>
       </div>
     </div>
 
     <div class="step">
       <div class="step-header">
         <span class="step-num">6</span>
-        <span class="step-title">一键跑完整 pipeline（可选）</span>
+        <span class="step-title">一键 pipeline（dedupe + rename + sync）</span>
       </div>
-      <div class="cmd-row">
-        <code>picvault pipeline --yes</code>
-        <button onclick="copyCmd(this, 'picvault pipeline --yes')">📋 复制</button>
+      <code class="cmd" id="pipelineCmd"></code>
+      <div class="btn-row">
+        <button onclick="copyText('pipelineCmd')">📋 复制</button>
+        <button class="danger" onclick="runApply(this, 'dedupe_apply', '⚠ 这会真跑 dedupe + rename + sync 整个流水线（移动/同步大量文件）。确认？\n\n继续？')">⚠ Run 全流程</button>
       </div>
+      <div class="tip warn" style="margin-top:8px">一步到位但不可分段回滚；建议先单独跑 2/3/4 各一步。</div>
     </div>
-  </div>
 
-  <!-- 提示侧栏 -->
-  <div class="card">
-    <h2>💡 提示</h2>
-    <div class="tip">
-      每 1-2 个月整理一次。<br>
-      <strong>清空工作盘前</strong>必须先 sync 到 WD4T。
+    <div class="card" id="outputPanel">
+      <h2>📤 最近输出</h2>
+      <div class="output-meta" id="outputMeta"></div>
+      <pre id="outputCmd"></pre>
+      <div id="outputStatus"></div>
+      <pre id="outputStdout"></pre>
+      <pre id="outputStderr"></pre>
     </div>
-    <div class="tip">
-      <code>picvault doctor</code> 检查依赖是否齐全。
-    </div>
-    <div class="tip">
-      <code>picvault status --watch</code> 每 3 秒刷新状态。
-    </div>
-    <div class="tip">
-      <code>picvault log</code> 看最近一次 pipeline 日志。
-    </div>
-    <div class="tip warn">
-      所有破坏性操作默认 dry-run，加 <code>--yes</code> 才真跑。
-    </div>
-  </div>
 
+  </div>
 </div>
 
-<footer>
-  PicVault · 个人照片视频整理方案
-</footer>
-
 <script>
+// ============================================================
+// Static configuration (paths are baked-in; runs server-side via /api/run)
+// ============================================================
+const PROJECT_ROOT = '/Users/yumeng/Documents/PicVault';
+const WORK = '/Volumes/Storage';
+const BACKUP = '/Volumes/WD4T/MediaVault';
 const API_URL = 'http://localhost:8765/api/status';
+const RUN_URL = 'http://localhost:8765/api/run';
+const PICVAULT = PROJECT_ROOT + '/picvault';
 
+// All command strings the dashboard shows. Args are absolute paths so
+// the user can paste them straight into a terminal without cd or PATH setup.
+const CMDS = {
+  inboxPath:       WORK + '/inbox',
+  dedupeDry:       PROJECT_ROOT + '/scripts/dedupe.py --work ' + WORK + ' --dry-run',
+  renameDry:       PROJECT_ROOT + '/scripts/rename_organize.py --work ' + WORK + ' --dry-run',
+  syncVerify:      PROJECT_ROOT + '/scripts/sync_to_backup.sh --work ' + WORK + ' --backup ' + BACKUP + ' --verify --dry-run',
+  webStart:        PICVAULT + ' web start',
+  pipeline:        PICVAULT + ' pipeline --yes',
+  // How to start web server from a terminal (absolute, no PATH needed):
+  startWebTerminal: 'nohup ' + PICVAULT + ' web start > /dev/null 2>&1 &',
+};
+
+// Hydrate <code>/<pre> elements
+['inboxPath','dedupeDry','renameDry','syncVerify','webStart','pipeline','startWebTerminal']
+  .forEach(k => {
+    const el = document.getElementById({
+      inboxPath:'inboxPath', dedupeDry:'dedupeDryCmd', renameDry:'renameDryCmd',
+      syncVerify:'syncVerifyCmd', webStart:'webStartCmd', pipeline:'pipelineCmd',
+      startWebTerminal:'startCmd'
+    }[k]);
+    if (el) el.textContent = CMDS[k];
+  });
+
+// ============================================================
+// Copy helper
+// ============================================================
+async function copyText(elemId) {
+  const text = document.getElementById(elemId).textContent;
+  await copyToClipboard(text);
+}
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    // Fallback for older browsers / file:// origin
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }
+}
+
+// ============================================================
+// Run helper
+// ============================================================
+async function runCommand(btn, cmdName) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⏳ 运行中...';
+  try {
+    const r = await fetch(RUN_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command: cmdName}),
+    });
+    const data = await r.json();
+    showOutput(data);
+    if (data.ok) pollStatus();
+  } catch (e) {
+    showOutput({ok: false, command: cmdName, error: '网络错误: ' + e.message});
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+async function runApply(btn, cmdName, confirmMsg) {
+  if (!confirm(confirmMsg)) return;
+  return runCommand(btn, cmdName);
+}
+
+function showOutput(data) {
+  const panel = document.getElementById('outputPanel');
+  const meta = document.getElementById('outputMeta');
+  const cmdEl = document.getElementById('outputCmd');
+  const statusEl = document.getElementById('outputStatus');
+  const stdoutEl = document.getElementById('outputStdout');
+  const stderrEl = document.getElementById('outputStderr');
+
+  const ts = new Date().toLocaleTimeString();
+  meta.textContent = ts + (data.rc !== undefined ? ' · rc=' + data.rc : '');
+  cmdEl.textContent = '$ ' + (data.command || '');
+  cmdEl.style.display = data.command ? 'block' : 'none';
+
+  if (data.ok) {
+    statusEl.innerHTML = '<span class="ok">✓ 成功</span>';
+  } else {
+    statusEl.innerHTML = '<span class="err">✗ ' + escapeHtml(data.error || 'failed') + '</span>';
+  }
+
+  stdoutEl.textContent = data.stdout || '';
+  stdoutEl.style.display = data.stdout ? 'block' : 'none';
+  stderrEl.textContent = data.stderr || '';
+  stderrEl.style.display = data.stderr ? 'block' : 'none';
+
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior: 'smooth'});
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+// Status poller
+// ============================================================
 async function pollStatus() {
   try {
     const r = await fetch(API_URL, { cache: 'no-store' });
@@ -336,59 +378,28 @@ async function pollStatus() {
       document.getElementById('vlogs').textContent = d.vlogs;
       document.getElementById('trash').textContent = d.trash;
       document.getElementById('starred').textContent = d.starred;
-      // Web UI is running
+      document.getElementById('lastSync').textContent = d.last_sync || '–';
       document.getElementById('webDot').className = 'dot running';
       document.getElementById('webStatus').textContent = 'Web UI: 运行中';
       document.getElementById('openWebBtn').style.display = 'inline-block';
-      document.getElementById('webHint').style.display = 'none';
+      document.getElementById('webNotRunningCard').style.display = 'none';
     } else {
-      throw new Error('bad status');
+      throw new Error('bad status ' + r.status);
     }
   } catch (e) {
-    // Web UI not running
     document.getElementById('webDot').className = 'dot stopped';
     document.getElementById('webStatus').textContent = 'Web UI: 未运行';
     document.getElementById('openWebBtn').style.display = 'none';
-    document.getElementById('webHint').style.display = 'block';
-    // Show dashes if we haven't loaded anything yet
-    ['inbox','byDate','screenshots','vlogs','trash','starred'].forEach(id => {
-      if (document.getElementById(id).textContent === '–') {
-        // keep dash
-      }
-    });
+    document.getElementById('webNotRunningCard').style.display = 'block';
   }
 }
 
+// Open the Web UI in a new tab
 function openWeb() {
-  // Open local Web UI in new tab
-  const url = API_URL.replace('/api/status', '/');
-  window.open(url, '_blank');
+  window.open('http://localhost:8765/', '_blank');
 }
 
-async function copyCmd(btn, cmd) {
-  try {
-    await navigator.clipboard.writeText(cmd);
-    const orig = btn.textContent;
-    btn.textContent = '✓ 已复制';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = orig;
-      btn.classList.remove('copied');
-    }, 1500);
-  } catch (e) {
-    // Fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = cmd;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    btn.textContent = '✓ 已复制';
-    setTimeout(() => { btn.textContent = btn.dataset.orig || '📋 复制'; }, 1500);
-  }
-}
-
-// Poll every 5 seconds
+// Initial poll + every 5s
 pollStatus();
 setInterval(pollStatus, 5000);
 </script>
