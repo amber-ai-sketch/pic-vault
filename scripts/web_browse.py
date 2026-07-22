@@ -24,6 +24,22 @@ from pathlib import Path
 ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
 THUMB_CACHE = '_meta/thumbs'
 
+# Sibling scripts discovered at import time (so absolute paths are baked in)
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+PICVAULT_BIN = PROJECT_ROOT / 'picvault'
+DEDUPE_SCRIPT = SCRIPT_DIR / 'dedupe.py'
+RENAME_SCRIPT = SCRIPT_DIR / 'rename_organize.py'
+SYNC_SCRIPT = SCRIPT_DIR / 'sync_to_backup.sh'
+INIT_SCRIPT = SCRIPT_DIR / 'init_storage.sh'
+BACKUP_DEFAULT = '/Volumes/WD4T/MediaVault'
+
+# Whitelist of commands runnable via /api/run. Each value is a zero-arg
+# callable that returns argv as a list. Args are SERVER-SIDE CONSTANTS -- no
+# user-supplied paths flow into subprocess. Populated in main() once --work
+# is resolved.
+RUN_COMMANDS = {}
+
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
     p = Path(path_str).expanduser().resolve()
@@ -354,6 +370,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # quiet
 
+    def do_OPTIONS(self):
+        # CORS preflight from file:// dashboard
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_POST(self):
         """Handle star/unstar JSON requests."""
         parsed = urllib.parse.urlparse(self.path)
@@ -389,6 +414,37 @@ class Handler(BaseHTTPRequestHandler):
                         stars.pop(path_q, None)
                 save_stars(self.work, bucket, stars)
                 self._send_json({'ok': True, 'starred': path_q in stars})
+                return
+            elif path == '/api/run':
+                # Body: {"command": "<whitelisted-name>"}
+                # Args are server-side constants; never user-supplied.
+                cmd_name = data.get('command') if isinstance(data, dict) else None
+                if cmd_name not in RUN_COMMANDS:
+                    self._send_json({
+                        'ok': False,
+                        'error': f'unknown command: {cmd_name!r}',
+                        'allowed': sorted(RUN_COMMANDS.keys()),
+                    })
+                    return
+                argv = RUN_COMMANDS[cmd_name]()
+                cmd_str = ' '.join(argv)
+                try:
+                    proc = subprocess.run(
+                        argv, capture_output=True, text=True, timeout=300
+                    )
+                    self._send_json({
+                        'ok': proc.returncode == 0,
+                        'rc': proc.returncode,
+                        'command': cmd_str,
+                        'stdout': proc.stdout,
+                        'stderr': proc.stderr,
+                    })
+                except subprocess.TimeoutExpired:
+                    self._send_json({'ok': False, 'command': cmd_str, 'error': 'timeout (300s)'})
+                except FileNotFoundError as e:
+                    self._send_json({'ok': False, 'command': cmd_str, 'error': f'not found: {e}'})
+                except Exception as e:
+                    self._send_json({'ok': False, 'command': cmd_str, 'error': str(e)})
                 return
             else:
                 self._send_json({'ok': False, 'error': 'unknown endpoint'})
@@ -467,6 +523,10 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, body: bytes, content_type='text/html', status=200):
         self.send_response(status)
         self.send_header('Content-Type', f'{content_type}; charset=utf-8')
+        # Allow dashboard.html opened via file:// to call /api/* freely.
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -554,6 +614,38 @@ def main():
 
     Handler.work = work
     Handler.thumb_root = thumb_root
+
+    # Build argv factories. Args are baked-in; no user input flows in.
+    w = str(work)
+    b = BACKUP_DEFAULT
+    pb = str(PICVAULT_BIN)
+
+    def _vlog(extra, dry=True):
+        # helper for dry/apply variants
+        pass  # placeholder; see explicit entries below
+
+    RUN_COMMANDS.update({
+        # --- read-only / status ---
+        'status':       lambda: [pb, 'status'],
+        'doctor':       lambda: [pb, 'doctor'],
+
+        # --- init / web lifecycle ---
+        'init':         lambda: ['bash', str(INIT_SCRIPT), '--work', w],
+        'web_start':    lambda: [pb, 'web', 'start'],
+        'web_stop':     lambda: [pb, 'web', 'stop'],
+
+        # --- dedupe (dry-run by default; apply moves files) ---
+        'dedupe_dry':   lambda: ['python3', str(DEDUPE_SCRIPT), '--work', w, '--dry-run'],
+        'dedupe_apply': lambda: ['python3', str(DEDUPE_SCRIPT), '--work', w],
+
+        # --- rename + organize ---
+        'rename_dry':   lambda: ['python3', str(RENAME_SCRIPT), '--work', w, '--dry-run'],
+        'rename_apply': lambda: ['python3', str(RENAME_SCRIPT), '--work', w],
+
+        # --- sync to backup (rsync; apply really mirrors) ---
+        'sync_verify':  lambda: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify', '--dry-run'],
+        'sync_apply':   lambda: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify'],
+    })
 
     # Try to get hostname for display
     # mDNS .local hostname is already returned by gethostname(); only append if missing
