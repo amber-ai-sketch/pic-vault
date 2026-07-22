@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage',)
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
 
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:

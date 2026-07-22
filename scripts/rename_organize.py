@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 # Sandbox
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage',)
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
 
 # Source whitelist
 SOURCE_WHITELIST = {

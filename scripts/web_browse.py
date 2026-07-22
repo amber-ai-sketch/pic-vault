@@ -21,7 +21,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage',)
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
 THUMB_CACHE = '_meta/thumbs'
 
 
