@@ -241,8 +241,8 @@ def main():
     else:
         print(f"  ✗ FAIL: rc={rc}, stderr={err}")
 
-    # === Test 6: rename_organize no-GPS + no-make rule ===
-    section("6. rename_organize.py - no GPS + no camera make rule")
+    # === Test 6: rename_organize no-GPS + no-make rule (v6 default: off) ===
+    section("6. rename_organize.py - no-GPS rule (v6 default: off)")
 
     shutil.rmtree(work / 'inbox', ignore_errors=True)
     shutil.rmtree(work / 'by-date', ignore_errors=True)
@@ -250,21 +250,34 @@ def main():
     work.mkdir(exist_ok=True)
     (work / 'inbox').mkdir(exist_ok=True)
 
-    # Image with no EXIF (no Make, no GPS) - should be detected as screenshot
-    make_png(inbox / 'IMG_0001.PNG')
+    # Image with no EXIF (no Make, no GPS).
+    # Filename "image.png" doesn't match any camera pattern (Rule 0),
+    # so Rule 2 (no-GPS) actually fires when --no-gps-rule is set.
+    # v6 default: rule is OFF -> file is treated as normal photo, not screenshot.
+    make_png(inbox / 'image.png')
 
     rc, out, err = run([
         'python3', str(SCRIPTS / 'rename_organize.py'),
         '--work', str(work),
         '--dry-run'
     ])
-    if rc == 0:
-        if 'screenshots/' in out:
-            print("  ✓ PNG without EXIF routed to screenshots/")
-        else:
-            print(f"  ✗ FAIL: output: {out}")
+    if rc == 0 and 'screenshots/' not in out and 'by-date/' in out:
+        print("  ✓ PNG without EXIF routed to by-date/ (v6 default: not screenshot)")
     else:
-        print(f"  ✗ FAIL: rc={rc}")
+        print(f"  ✗ FAIL: output: {out}")
+
+    # Opt-in: with --no-gps-rule, the same file should be classified as screenshot.
+    shutil.rmtree(work / 'by-date', ignore_errors=True)
+    rc, out, err = run([
+        'python3', str(SCRIPTS / 'rename_organize.py'),
+        '--work', str(work),
+        '--dry-run',
+        '--no-gps-rule'
+    ])
+    if rc == 0 and 'screenshots/' in out:
+        print("  ✓ --no-gps-rule opt-in still routes PNG to screenshots/")
+    else:
+        print(f"  ✗ FAIL with --no-gps-rule: output: {out}")
 
     # === Test 7: rename_organize real photo with Make goes to by-date ===
     section("7. rename_organize.py - real photo with Make goes to by-date")

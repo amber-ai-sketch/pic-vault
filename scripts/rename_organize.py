@@ -713,9 +713,9 @@ def main():
                         help='Path to events.yaml (default: <work>/_meta/events.yaml)')
     parser.add_argument('--source', default=None,
                         help='Default source for files without EXIF (e.g., iphone, canon)')
-    parser.add_argument('--no-gps-rule', action='store_true', default=True,
-                        help='Apply no-GPS+no-make rule for screenshots (default: on)')
-    parser.add_argument('--no-gps-rule-off', dest='no_gps_rule', action='store_false')
+    parser.add_argument('--no-gps-rule', dest='no_gps_rule', action='store_true',
+                        default=False,
+                        help='Re-enable the no-GPS+no-make screenshot fallback (default: off since v6)')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
