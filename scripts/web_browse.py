@@ -315,18 +315,46 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     return b''.join(parts)
 
 
+# macOS / Spotlight / version-control noise to skip at directory level
+_HIDDEN_DIR_NOISE = frozenset({
+    '.DS_Store',  # not a dir, but include for safety
+    '.Spotlight-V100', '.Trashes', '.fseventsd',
+    '.git', '.idea', '.vscode', '.svn', '.hg',
+    '__pycache__',
+})
+
+
 def count_files_in(dir_path: Path) -> int:
-    """Count files in a directory, excluding hidden system files."""
+    """Count files under dir_path, skipping macOS noise and hidden-dir subtrees.
+
+    Skipped:
+      - any file named exactly .DS_Store
+      - any path whose components include a hidden-dir-noise name
+        (e.g. .git/, .Spotlight-V100/, .Trashes/)
+
+    NOT skipped:
+      - individual files whose name happens to start with '.'
+        (e.g. Android '.trashed-<ts>-IMG_xxx.jpg', '.Screenshot_xxx.jpg').
+        Old logic was too aggressive and reported 0 for such inboxes.
+    """
     if not dir_path.exists():
         return 0
     try:
         n = 0
+        rel_base = dir_path.resolve()
         for f in dir_path.rglob('*'):
-            if f.is_file() and not f.name.startswith('.'):
-                # Skip .DS_Store and similar
-                if f.name in ('.DS_Store',):
-                    continue
-                n += 1
+            if not f.is_file():
+                continue
+            if f.name == '.DS_Store':
+                continue
+            try:
+                parts = set(f.resolve().relative_to(rel_base).parts)
+            except ValueError:
+                # Path outside rel_base (symlink escape) -- skip conservatively
+                continue
+            if parts & _HIDDEN_DIR_NOISE:
+                continue
+            n += 1
         return n
     except Exception:
         return 0
