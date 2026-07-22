@@ -29,3 +29,6 @@ config.local.yaml
 /work/inbox/
 /work/_meta/logs/*.log
 /work/_meta/web.pid
+
+# Local agent conventions (per-machine, not for collaborators)
+AGENTS.md
