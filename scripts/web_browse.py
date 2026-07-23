@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import html as html_lib
 import json
 import mimetypes
 import os
@@ -163,156 +164,872 @@ def save_stars(work: Path, bucket: str, stars: dict):
     path.write_text(json.dumps({k: True for k in stars}, indent=2, ensure_ascii=False))
 
 
-HTML_HEAD = '''<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>PicVault</title>
-<style>
-  body { font-family: -apple-system, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-  .item { background: #f5f5f5; border-radius: 8px; overflow: hidden; position: relative; }
-  .item img { width: 100%; height: 180px; object-fit: cover; display: block; }
-  .item video { width: 100%; height: 180px; object-fit: cover; display: block; background: #000; }
-  .item .name { padding: 5px; font-size: 11px; word-break: break-all; }
-  .item .star { position: absolute; top: 5px; right: 5px; background: rgba(0,0,0,0.5); color: #fff; border: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 16px; }
-  .item .star.on { background: gold; color: #333; }
-  h1, h2 { color: #333; }
-  a { color: #0066cc; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .nav { margin-bottom: 20px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
-</style>
-<script>
-// Star/unstar on click. Uses fetch() to POST /api/star with path+bucket.
-document.addEventListener('click', async function(e) {
-  var btn = e.target.closest('.star');
-  if (!btn) return;
-  e.preventDefault();
-  var path = btn.getAttribute('data-path');
-  var bucket = btn.getAttribute('data-bucket');
-  if (!path || !bucket) return;
-  try {
-    var r = await fetch('/api/star', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({path: path, bucket: bucket, action: 'toggle'})
-    });
-    var data = await r.json();
-    if (data.ok) {
-      if (data.starred) { btn.classList.add('on'); btn.textContent = '★'; }
-      else { btn.classList.remove('on'); btn.textContent = '☆'; }
-    } else {
-      alert('Star failed: ' + (data.error || 'unknown'));
-    }
-  } catch (err) {
-    alert('Network error: ' + err);
+# —— Browse UI (contact-sheet gallery) ————————————————————————————————
+# Shares visual language with outputs/dashboard.html: Syne / Figtree /
+# JetBrains Mono, cool slate-cyan archive palette. Signature: contact-sheet
+# frames with cyan top rail + amber star notch.
+
+VIDEO_EXTS = {'.mp4', '.mov', '.webm', '.m4v'}
+
+
+def _esc(s) -> str:
+    return html_lib.escape(str(s), quote=True)
+
+
+PAGE_CSS = '''
+:root {
+  --paper: #C8D0D8;
+  --ink: #15202B;
+  --cyan: #178A9C;
+  --amber: #C48A1A;
+  --live: #1F7A4D;
+  --rail: #E8EEF2;
+  --muted: #5A6A78;
+  --sheet: #B8C2CC;
+  --frame: #DCE3E9;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Figtree", sans-serif;
+  color: var(--ink);
+  line-height: 1.5;
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(rgba(21,32,43,0.045) 0.6px, transparent 0.6px),
+    repeating-linear-gradient(-28deg, transparent 0, transparent 11px, rgba(21,32,43,0.028) 11px, rgba(21,32,43,0.028) 12px);
+  background-size: 4px 4px, auto;
+}
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+
+.masthead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px 24px;
+  align-items: end;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(21,32,43,0.18);
+  margin-bottom: 28px;
+}
+.brand {
+  font-family: "Syne", sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.9rem, 5vw, 2.8rem);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+  margin: 0;
+  color: var(--ink);
+}
+.brand a { color: inherit; text-decoration: none; }
+.brand a:hover { color: var(--cyan); text-decoration: none; }
+.tagline { margin: 8px 0 0; font-size: 0.92rem; color: var(--muted); max-width: 40em; }
+.work-path {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+  word-break: break-all;
+  max-width: 28em;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+  margin: -12px 0 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(21,32,43,0.1);
+}
+.nav a, .nav span {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.nav a:hover {
+  color: var(--ink);
+  border-color: rgba(21,32,43,0.2);
+  background: var(--rail);
+  text-decoration: none;
+}
+.nav a.here {
+  color: var(--ink);
+  border-color: rgba(23,138,156,0.45);
+  background: rgba(23,138,156,0.1);
+}
+.nav .sep { color: rgba(21,32,43,0.25); padding: 5px 2px; user-select: none; }
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-bottom: 18px;
+}
+.page-title {
+  font-family: "Syne", sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.5rem, 3.5vw, 2.1rem);
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.1;
+}
+.page-meta {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.section-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.toolbar .count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-right: auto;
+}
+.chip {
+  font-family: "Figtree", sans-serif;
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 5px 11px;
+  border: 1px solid rgba(21,32,43,0.28);
+  border-radius: 2px;
+  background: var(--rail);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.chip:hover { border-color: var(--cyan); }
+.chip.on {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #fff;
+}
+.chip.on .n { color: rgba(255,255,255,0.85); }
+.chip .n {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+/* Year / month ledger */
+.ledger {
+  border: 1px solid rgba(21,32,43,0.22);
+  border-top: 3px solid var(--cyan);
+  background: rgba(232,238,242,0.55);
+}
+.ledger-row {
+  display: grid;
+  grid-template-columns: minmax(5.5em, auto) 1fr auto;
+  gap: 10px 18px;
+  align-items: baseline;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(21,32,43,0.12);
+  text-decoration: none;
+  color: inherit;
+}
+.ledger-row:last-child { border-bottom: none; }
+.ledger-row:hover {
+  background: rgba(23,138,156,0.08);
+  text-decoration: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ledger-row {
+    animation: frameIn .4s ease forwards;
   }
-});
-</script>
-</head><body>
-<div class="nav">
-  <a href="/">Home</a> |
-  <a href="/screenshots">Screenshots</a> |
-  <a href="/themes">Themes</a>
-</div>
+  .ledger-row:nth-child(1) { animation-delay: .04s; }
+  .ledger-row:nth-child(2) { animation-delay: .08s; }
+  .ledger-row:nth-child(3) { animation-delay: .12s; }
+  .ledger-row:nth-child(4) { animation-delay: .16s; }
+  .ledger-row:nth-child(5) { animation-delay: .2s; }
+  .ledger-row:nth-child(6) { animation-delay: .24s; }
+  .ledger-row:nth-child(7) { animation-delay: .28s; }
+  .ledger-row:nth-child(8) { animation-delay: .32s; }
+}
+.ledger-key {
+  font-family: "Syne", sans-serif;
+  font-weight: 800;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.ledger-sub {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.ledger-sub .theme {
+  color: var(--cyan);
+  font-weight: 600;
+}
+.ledger-stats {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.ledger-empty {
+  padding: 28px 16px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Contact sheet */
+.sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 0;
+  border: 1px solid rgba(21,32,43,0.22);
+  border-top: 3px solid var(--cyan);
+  background: var(--sheet);
+}
+.cell {
+  position: relative;
+  background: var(--frame);
+  border-right: 1px solid rgba(21,32,43,0.14);
+  border-bottom: 1px solid rgba(21,32,43,0.14);
+}
+.cell.hidden { display: none; }
+.cell.starred { box-shadow: inset 0 0 0 2px rgba(196,138,26,0.55); }
+@media (prefers-reduced-motion: no-preference) {
+  .cell { animation: frameIn .45s ease forwards; }
+  .cell:nth-child(6n+1) { animation-delay: .03s; }
+  .cell:nth-child(6n+2) { animation-delay: .06s; }
+  .cell:nth-child(6n+3) { animation-delay: .09s; }
+  .cell:nth-child(6n+4) { animation-delay: .12s; }
+  .cell:nth-child(6n+5) { animation-delay: .15s; }
+  .cell:nth-child(6n+6) { animation-delay: .18s; }
+}
+
+@keyframes frameIn {
+  from { transform: translateY(8px); }
+  to { transform: translateY(0); }
+}
+
+.cell .thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: #9AA6B2;
+  cursor: zoom-in;
+  vertical-align: middle;
+}
+.cell .thumb-miss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  background: #9AA6B2;
+  color: var(--ink);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+.cell .edge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px 7px;
+  background: rgba(232,238,242,0.85);
+  border-top: 1px solid rgba(21,32,43,0.1);
+}
+.cell .idx {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.cell .fname {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cell .badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  background: rgba(21,32,43,0.72);
+  color: #fff;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.star {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(21,32,43,0.35);
+  border-radius: 2px;
+  background: rgba(232,238,242,0.92);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition: background .15s, color .15s, border-color .15s, transform .15s;
+  z-index: 2;
+}
+.star:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+  transform: scale(1.06);
+}
+.star.on {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #1a1408;
+}
+.star.busy { opacity: 0.55; pointer-events: none; }
+.star.pulse { animation: starPulse .35s ease; }
+@keyframes starPulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+/* Lightbox */
+.lb {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(21,32,43,0.88);
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lb.open { display: flex; }
+.lb img, .lb video {
+  max-width: min(96vw, 1200px);
+  max-height: 88vh;
+  object-fit: contain;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.45);
+}
+.lb-bar {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(232,238,242,0.95);
+  border: 1px solid rgba(21,32,43,0.25);
+  border-radius: 2px;
+  padding: 8px 12px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--ink);
+  max-width: 90vw;
+}
+.lb-bar .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 48vw;
+}
+.lb-bar button {
+  font-family: "Figtree", sans-serif;
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border: 1px solid rgba(21,32,43,0.28);
+  border-radius: 2px;
+  background: var(--rail);
+  color: var(--ink);
+  cursor: pointer;
+}
+.lb-bar button:hover { border-color: var(--cyan); }
+.lb-bar .star-lb.on {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--ink);
+  color: var(--rail);
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  border-radius: 2px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+  z-index: 200;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+.pre-block {
+  margin: 0;
+  padding: 16px;
+  background: rgba(232,238,242,0.7);
+  border: 1px solid rgba(21,32,43,0.18);
+  border-top: 3px solid var(--cyan);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .masthead { grid-template-columns: 1fr; }
+  .work-path { text-align: left; max-width: none; }
+  .ledger-row { grid-template-columns: 1fr; gap: 4px; }
+  .ledger-stats { text-align: left; white-space: normal; }
+  .sheet { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star.pulse { animation: none; }
+  html { scroll-behavior: auto; }
+}
 '''
 
-HTML_FOOT = '</body></html>'
+PAGE_JS = '''
+(function () {
+  var toastEl = null;
+  function toast(msg) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.className = 'toast';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastEl._t);
+    toastEl._t = setTimeout(function () { toastEl.classList.remove('show'); }, 1800);
+  }
+
+  async function toggleStar(btn) {
+    var path = btn.getAttribute('data-path');
+    var bucket = btn.getAttribute('data-bucket');
+    if (!path || !bucket || btn.classList.contains('busy')) return;
+    btn.classList.add('busy');
+    try {
+      var r = await fetch('/api/star', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path, bucket: bucket, action: 'toggle' })
+      });
+      var data = await r.json();
+      if (!data.ok) {
+        toast('加星失败：' + (data.error || 'unknown'));
+        return;
+      }
+      setStarred(btn, data.starred);
+      btn.classList.add('pulse');
+      setTimeout(function () { btn.classList.remove('pulse'); }, 350);
+      syncStarCount();
+      applyFilter();
+      var lbStar = document.querySelector('.star-lb');
+      if (lbStar && lbStar.getAttribute('data-path') === path) {
+        setStarred(lbStar, data.starred);
+      }
+    } catch (err) {
+      toast('网络错误：' + err);
+    } finally {
+      btn.classList.remove('busy');
+    }
+  }
+
+  function setStarred(btn, on) {
+    btn.classList.toggle('on', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.textContent = on ? '★' : '☆';
+    btn.title = on ? '取消加星' : '加星';
+    var cell = btn.closest('.cell');
+    if (cell) cell.classList.toggle('starred', !!on);
+  }
+
+  function syncStarCount() {
+    var n = document.querySelectorAll('.cell.starred').length;
+    var el = document.getElementById('starCount');
+    if (el) el.textContent = String(n);
+    var chipN = document.querySelector('[data-filter="starred"] .n');
+    if (chipN) chipN.textContent = String(n);
+    var meta = document.getElementById('pageMetaStars');
+    if (meta) meta.textContent = String(n);
+  }
+
+  var filterMode = 'all';
+  function applyFilter() {
+    document.querySelectorAll('.cell').forEach(function (cell) {
+      var show = filterMode === 'all' || cell.classList.contains('starred');
+      cell.classList.toggle('hidden', !show);
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var star = e.target.closest('.star');
+    if (star) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleStar(star);
+      return;
+    }
+    var chip = e.target.closest('[data-filter]');
+    if (chip) {
+      filterMode = chip.getAttribute('data-filter');
+      document.querySelectorAll('[data-filter]').forEach(function (c) {
+        c.classList.toggle('on', c === chip);
+      });
+      applyFilter();
+      return;
+    }
+    var thumb = e.target.closest('[data-lightbox]');
+    if (thumb) {
+      e.preventDefault();
+      openLightbox(thumb);
+      return;
+    }
+    if (e.target.id === 'lbClose' || e.target.classList.contains('lb')) {
+      closeLightbox();
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeLightbox();
+  });
+
+  var lb = null;
+  function openLightbox(el) {
+    var src = el.getAttribute('data-lightbox');
+    var path = el.getAttribute('data-path') || '';
+    var bucket = el.getAttribute('data-bucket') || '';
+    var name = el.getAttribute('data-name') || '';
+    var isVideo = el.getAttribute('data-video') === '1';
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.className = 'lb';
+      lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
+        '<span class="nm"></span>' +
+        '<button type="button" class="star star-lb" title="加星">☆</button>' +
+        '<a class="open-raw" href="#" target="_blank" rel="noopener">原图</a>' +
+        '<button type="button" id="lbClose">关闭</button></div>';
+      document.body.appendChild(lb);
+    }
+    var media = lb.querySelector('.lb-media');
+    media.innerHTML = '';
+    if (isVideo) {
+      var v = document.createElement('video');
+      v.src = src;
+      v.controls = true;
+      v.autoplay = true;
+      media.appendChild(v);
+    } else {
+      var img = document.createElement('img');
+      img.src = src;
+      img.alt = name;
+      media.appendChild(img);
+    }
+    lb.querySelector('.nm').textContent = name;
+    var raw = lb.querySelector('.open-raw');
+    raw.href = src;
+    var starBtn = lb.querySelector('.star-lb');
+    starBtn.setAttribute('data-path', path);
+    starBtn.setAttribute('data-bucket', bucket);
+    var cellStar = document.querySelector('.star[data-path="' + CSS.escape(path) + '"]');
+    setStarred(starBtn, cellStar ? cellStar.classList.contains('on') : false);
+    lb.classList.add('open');
+  }
+  function closeLightbox() {
+    if (!lb) return;
+    lb.classList.remove('open');
+    var media = lb.querySelector('.lb-media');
+    if (media) media.innerHTML = '';
+  }
+})();
+'''
+
+
+def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) -> bytes:
+    """Wrap page body in shared masthead / nav / assets."""
+    crumbs = crumbs or [('首页', '/')]
+    nav_parts = []
+    for i, (label, href) in enumerate(crumbs):
+        if i:
+            nav_parts.append('<span class="sep">/</span>')
+        if href and i < len(crumbs) - 1:
+            nav_parts.append(f'<a href="{_esc(href)}">{_esc(label)}</a>')
+        else:
+            nav_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
+    # Always expose Screenshots + Themes as secondary jumps
+    nav_parts.append('<span class="sep">·</span>')
+    nav_parts.append('<a href="/screenshots">截图</a>')
+    nav_parts.append('<a href="/themes">主题</a>')
+
+    work_html = ''
+    if work is not None:
+        work_html = f'<div class="work-path">{_esc(work)}</div>'
+
+    doc = f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(title)} — PicVault</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>{PAGE_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div>
+      <h1 class="brand"><a href="/">PicVault</a></h1>
+      <p class="tagline">归档图库 · 浏览与加星</p>
+    </div>
+    {work_html}
+  </header>
+  <nav class="nav" aria-label="面包屑">{''.join(nav_parts)}</nav>
+  {body}
+</div>
+<script>{PAGE_JS}</script>
+</body>
+</html>'''
+    return doc.encode('utf-8')
+
+
+def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
+                stars: dict, index: int) -> str:
+    rel = str(f.relative_to(work))
+    is_video = f.suffix.lower() in VIDEO_EXTS
+    is_starred = rel in stars
+    q = urllib.parse.quote(rel)
+    raw_url = f'/raw?p={q}'
+    thumb = thumb_for(f, work, thumb_root)
+    if thumb and thumb.exists():
+        media = (
+            f'<img class="thumb" src="/thumb?p={q}" alt="{_esc(f.name)}" '
+            f'loading="lazy" data-lightbox="{_esc(raw_url)}" '
+            f'data-path="{_esc(rel)}" data-bucket="{_esc(bucket)}" '
+            f'data-name="{_esc(f.name)}" data-video="{"1" if is_video else "0"}">'
+        )
+    elif is_video:
+        media = (
+            f'<video class="thumb" src="{_esc(raw_url)}" muted playsinline '
+            f'data-lightbox="{_esc(raw_url)}" data-path="{_esc(rel)}" '
+            f'data-bucket="{_esc(bucket)}" data-name="{_esc(f.name)}" data-video="1"></video>'
+        )
+    else:
+        media = (
+            f'<a class="thumb-miss" href="{_esc(raw_url)}" '
+            f'data-lightbox="{_esc(raw_url)}" data-path="{_esc(rel)}" '
+            f'data-bucket="{_esc(bucket)}" data-name="{_esc(f.name)}" data-video="0">查看</a>'
+        )
+    badge = '<span class="badge">VIDEO</span>' if is_video else ''
+    star_cls = 'star on' if is_starred else 'star'
+    star_char = '★' if is_starred else '☆'
+    cell_cls = 'cell starred' if is_starred else 'cell'
+    return (
+        f'<article class="{cell_cls}">'
+        f'{media}{badge}'
+        f'<button type="button" class="{star_cls}" data-path="{_esc(rel)}" '
+        f'data-bucket="{_esc(bucket)}" aria-pressed="{"true" if is_starred else "false"}" '
+        f'title="{"取消加星" if is_starred else "加星"}">{star_char}</button>'
+        f'<div class="edge"><span class="idx">{index:03d}</span>'
+        f'<span class="fname" title="{_esc(f.name)}">{_esc(f.name)}</span></div>'
+        f'</article>'
+    )
+
+
+def _gallery_toolbar(file_count: int, star_count: int) -> str:
+    return (
+        f'<div class="toolbar">'
+        f'<span class="count">{file_count} 个文件 · '
+        f'<span id="pageMetaStars">{star_count}</span> 已加星</span>'
+        f'<button type="button" class="chip on" data-filter="all">全部</button>'
+        f'<button type="button" class="chip" data-filter="starred">'
+        f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
+        f'</div>'
+    )
 
 
 def render_home(work: Path) -> bytes:
     buckets = scan_buckets(work)
-    parts = [HTML_HEAD.encode(), f'<h1>PicVault</h1><p>Work: {work}</p>'.encode()]
-    parts.append(f'<h2>Years</h2><div class="grid">'.encode())
-    for year in sorted(buckets['years'].keys(), reverse=True):
+    years = sorted(buckets['years'].keys(), reverse=True)
+    rows = []
+    for year in years:
         months = buckets['years'][year]
         total_photos = sum(m['photos'] for m in months)
         total_videos = sum(m['videos'] for m in months)
-        parts.append(
-            f'<div class="item"><div class="name"><a href="/y/{year}"><b>{year}</b></a><br>'
-            f'{len(months)} months<br>{total_photos} photos<br>{total_videos} videos</div></div>'.encode()
+        themed = sum(1 for m in months if m.get('is_themed'))
+        rows.append(
+            f'<a class="ledger-row" href="/y/{_esc(year)}">'
+            f'<span class="ledger-key">{_esc(year)}</span>'
+            f'<span class="ledger-sub">{len(months)} 个月'
+            f'{" · " + str(themed) + " 个主题" if themed else ""}</span>'
+            f'<span class="ledger-stats">{total_photos} 张 · {total_videos} 视频</span>'
+            f'</a>'
         )
-    parts.append(b'</div>')
+    if not rows:
+        ledger = '<div class="ledger"><div class="ledger-empty">还没有归档。把照片放进 inbox/ 后跑 pipeline。</div></div>'
+    else:
+        ledger = f'<div class="ledger">{"".join(rows)}</div>'
+
+    shot_link = ''
     if buckets['screenshots_count'] > 0:
-        parts.append(
-            f'<p><a href="/screenshots">→ {buckets["screenshots_count"]} screenshots</a></p>'.encode()
+        shot_link = (
+            f'<p style="margin:20px 0 0;font-size:0.92rem;color:var(--muted)">'
+            f'<a href="/screenshots">截图库 → {buckets["screenshots_count"]} 个文件</a></p>'
         )
-    parts.append(HTML_FOOT.encode())
-    return b''.join(parts)
+
+    body = (
+        f'<div class="page-head">'
+        f'<h2 class="page-title">年份索引</h2>'
+        f'<p class="page-meta">按 by-date/ 浏览归档</p>'
+        f'</div>'
+        f'<p class="section-label">Years</p>'
+        f'{ledger}{shot_link}'
+    )
+    return page_shell('归档浏览', body, work=work, crumbs=[('首页', '/')])
 
 
 def render_year(work: Path, year: str) -> bytes:
-    months = list_bucket.__self__ if False else None  # placeholder
     by_date = work / 'by-date' / year
     if not by_date.exists():
-        return (HTML_HEAD + f'<h1>{year}</h1><p>not found</p>' + HTML_FOOT).encode()
-    months = []
-    for m in sorted(by_date.iterdir()):
-        if not m.is_dir():
-            continue
-        months.append(m)
-    parts = [HTML_HEAD.encode(), f'<h1>{year}</h1><div class="grid">'.encode()]
+        body = (
+            f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
+            f'<div class="ledger"><div class="ledger-empty">未找到该年份。</div></div>'
+        )
+        return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
+
+    months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
+    rows = []
     for m in months:
-        photo_count = sum(1 for _ in (m/'photos').rglob('*') if _.is_file()) if (m/'photos').exists() else 0
-        video_count = sum(1 for _ in (m/'videos').rglob('*') if _.is_file()) if (m/'videos').exists() else 0
+        photo_count = sum(1 for _ in (m / 'photos').rglob('*') if _.is_file()) if (m / 'photos').exists() else 0
+        video_count = sum(1 for _ in (m / 'videos').rglob('*') if _.is_file()) if (m / 'videos').exists() else 0
         is_themed = '_' in m.name
         theme = m.name.split('_', 1)[1] if is_themed else ''
-        parts.append(
-            f'<div class="item"><div class="name"><a href="/y/{year}/{urllib.parse.quote(m.name)}"><b>{m.name}</b></a><br>'
-            f'{"theme: "+theme if theme else "default bucket"}<br>{photo_count} photos<br>{video_count} videos</div></div>'.encode()
+        sub = (
+            f'<span class="theme">{_esc(theme)}</span>'
+            if theme else '默认桶'
         )
-    parts.append(b'</div>' + HTML_FOOT.encode())
-    return b''.join(parts)
+        href = f'/y/{year}/{urllib.parse.quote(m.name)}'
+        rows.append(
+            f'<a class="ledger-row" href="{_esc(href)}">'
+            f'<span class="ledger-key">{_esc(m.name)}</span>'
+            f'<span class="ledger-sub">{sub}</span>'
+            f'<span class="ledger-stats">{photo_count} 张 · {video_count} 视频</span>'
+            f'</a>'
+        )
+
+    ledger_inner = ''.join(rows) if rows else '<div class="ledger-empty">空年份</div>'
+    body = (
+        f'<div class="page-head">'
+        f'<h2 class="page-title">{_esc(year)}</h2>'
+        f'<p class="page-meta">{len(months)} 个桶</p>'
+        f'</div>'
+        f'<p class="section-label">Months</p>'
+        f'<div class="ledger">{ledger_inner}</div>'
+    )
+    return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
 
 
 def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     bucket_name = month
     files = list_bucket(work, year, month)
     stars = load_stars(work, bucket_name)
-    parts = [HTML_HEAD.encode(), f'<h1>{year}/{month}</h1>'.encode(),
-             f'<p>{len(files)} files, {len(stars)} starred</p>'.encode(),
-             b'<div class="grid">']
-    for f in files:
-        rel = str(f.relative_to(work))
-        thumb = thumb_for(f, work, thumb_root)
-        is_video = f.suffix.lower() in {'.mp4', '.mov', '.webm', '.m4v'}
-        is_starred = rel in stars
-        if thumb and thumb.exists():
-            media = f'<a href="/raw?p={urllib.parse.quote(rel)}"><img src="/thumb?p={urllib.parse.quote(rel)}"></a>'
-        elif is_video:
-            media = f'<video src="/raw?p={urllib.parse.quote(rel)}" muted></video>'
-        else:
-            media = f'<a href="/raw?p={urllib.parse.quote(rel)}">view</a>'
-        parts.append(
-            f'<div class="item">{media}'
-            f'<button class="star {"on" if is_starred else ""}" data-path="{urllib.parse.quote(rel)}" data-bucket="{bucket_name}">{"★" if is_starred else "☆"}</button>'
-            f'<div class="name">{f.name}</div></div>'.encode()
-        )
-    parts.append(b'</div>' + HTML_FOOT.encode())
-    return b''.join(parts)
+    cells = [
+        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
+        for i, f in enumerate(files)
+    ]
+    sheet = (
+        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
+        if cells else
+        '<div class="ledger"><div class="ledger-empty">这个桶里还没有文件。</div></div>'
+    )
+    body = (
+        f'<div class="page-head">'
+        f'<h2 class="page-title">{_esc(month)}</h2>'
+        f'<p class="page-meta">{_esc(year)}</p>'
+        f'</div>'
+        f'{_gallery_toolbar(len(files), len(stars))}'
+        f'{sheet}'
+    )
+    return page_shell(
+        f'{year}/{month}',
+        body,
+        work=work,
+        crumbs=[
+            ('首页', '/'),
+            (year, f'/y/{year}'),
+            (month, f'/y/{year}/{urllib.parse.quote(month)}'),
+        ],
+    )
 
 
 def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     files = list_screenshots(work)
     bucket_name = 'screenshots'
     stars = load_stars(work, bucket_name)
-    parts = [HTML_HEAD.encode(), '<h1>Screenshots</h1>'.encode(),
-             f'<p>{len(files)} files</p>'.encode(), b'<div class="grid">']
-    for f in files:
-        rel = str(f.relative_to(work))
-        thumb = thumb_for(f, work, thumb_root)
-        is_starred = rel in stars
-        is_video = f.suffix.lower() in {'.mp4', '.mov', '.webm', '.m4v'}
-        if thumb and thumb.exists():
-            media = f'<a href="/raw?p={urllib.parse.quote(rel)}"><img src="/thumb?p={urllib.parse.quote(rel)}"></a>'
-        elif is_video:
-            media = f'<video src="/raw?p={urllib.parse.quote(rel)}" muted></video>'
-        else:
-            media = f'<a href="/raw?p={urllib.parse.quote(rel)}">view</a>'
-        parts.append(
-            f'<div class="item">{media}'
-            f'<button class="star {"on" if is_starred else ""}" data-path="{urllib.parse.quote(rel)}" data-bucket="{bucket_name}">{"★" if is_starred else "☆"}</button>'
-            f'<div class="name">{f.name}</div></div>'.encode()
-        )
-    parts.append(b'</div>' + HTML_FOOT.encode())
-    return b''.join(parts)
+    cells = [
+        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
+        for i, f in enumerate(files)
+    ]
+    sheet = (
+        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
+        if cells else
+        '<div class="ledger"><div class="ledger-empty">没有截图。</div></div>'
+    )
+    body = (
+        f'<div class="page-head">'
+        f'<h2 class="page-title">截图</h2>'
+        f'<p class="page-meta">screenshots/</p>'
+        f'</div>'
+        f'{_gallery_toolbar(len(files), len(stars))}'
+        f'{sheet}'
+    )
+    return page_shell(
+        '截图',
+        body,
+        work=work,
+        crumbs=[('首页', '/'), ('截图', '/screenshots')],
+    )
 
 
 # macOS / Spotlight / version-control noise to skip at directory level
@@ -391,6 +1108,21 @@ def last_sync_time(work: Path) -> str:
     return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
 
 
+# Top-level dirs created by init_storage.sh (must all exist as directories).
+_INIT_SKELETON_DIRS = (
+    'inbox', 'by-date', 'screenshots', '_favorite', '_vlogs', '_trash', '_meta',
+)
+
+
+def is_work_initialized(work: Path) -> bool:
+    """True if work disk has the init_storage.sh skeleton + _meta/events.yaml file."""
+    for name in _INIT_SKELETON_DIRS:
+        p = work / name
+        if not p.is_dir():
+            return False
+    return (work / '_meta' / 'events.yaml').is_file()
+
+
 class Handler(BaseHTTPRequestHandler):
     work: Path = None
     thumb_root: Path = None
@@ -424,7 +1156,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/api/star' and 'path' in qs and 'bucket' in qs:
                 path_q = qs['path'][0] if isinstance(qs['path'], list) else qs['path']
+                path_q = urllib.parse.unquote(path_q)
                 bucket = qs['bucket'][0] if isinstance(qs['bucket'], list) else qs['bucket']
+                bucket = urllib.parse.unquote(str(bucket))
                 # Security: path must be under work
                 full = (self.work / path_q).resolve()
                 if not str(full).startswith(str(self.work.resolve())):
@@ -496,6 +1230,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     'running': True,
                     'work': str(self.work),
+                    'initialized': is_work_initialized(self.work),
                     'inbox': count_files_in(self.work / 'inbox'),
                     'by_date': count_files_in(self.work / 'by-date'),
                     'screenshots': count_files_in(self.work / 'screenshots'),
@@ -525,7 +1260,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_thumb(p)
             elif path == '/api/star' and 'path' in qs and 'bucket' in qs:
                 path_q = qs['path'][0] if isinstance(qs['path'], list) else qs['path']
+                path_q = urllib.parse.unquote(path_q)
                 bucket = qs['bucket'][0] if isinstance(qs['bucket'], list) else qs['bucket']
+                bucket = urllib.parse.unquote(str(bucket))
                 # Security: path must be under work
                 full = (self.work / path_q).resolve()
                 if not str(full).startswith(str(self.work.resolve())):
@@ -606,8 +1343,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _render_themes(self) -> bytes:
         path = self.work / '_meta' / 'events.yaml'
+        crumbs = [('首页', '/'), ('主题', '/themes')]
         if not path.exists():
-            return (HTML_HEAD + '<h1>Themes</h1><p>No events.yaml found</p>' + HTML_FOOT).encode()
+            body = (
+                '<div class="page-head"><h2 class="page-title">主题</h2></div>'
+                '<div class="ledger"><div class="ledger-empty">'
+                '未找到 events.yaml。</div></div>'
+            )
+            return page_shell('主题', body, work=self.work, crumbs=crumbs)
         text = path.read_text()
         # Crude themes section extract
         in_themes = False
@@ -620,8 +1363,15 @@ class Handler(BaseHTTPRequestHandler):
                 if line and not line.startswith(' ') and not line.startswith('#'):
                     break
                 themes_text.append(line)
-        body = HTML_HEAD + '<h1>Themes</h1><pre>' + '\n'.join(themes_text) + '</pre>' + HTML_FOOT
-        return body.encode()
+        content = '\n'.join(themes_text).strip() or '(空)'
+        body = (
+            '<div class="page-head">'
+            '<h2 class="page-title">主题</h2>'
+            '<p class="page-meta">_meta/events.yaml</p>'
+            '</div>'
+            f'<pre class="pre-block">{_esc(content)}</pre>'
+        )
+        return page_shell('主题', body, work=self.work, crumbs=crumbs)
 
 
 def main():
