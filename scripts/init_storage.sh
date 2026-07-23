@@ -70,6 +70,8 @@ fi
 mkdir -p "$WORK/inbox"
 mkdir -p "$WORK/by-date"
 mkdir -p "$WORK/screenshots"
+mkdir -p "$WORK/screenrecords"
+mkdir -p "$WORK/docs"
 mkdir -p "$WORK/_favorite"
 mkdir -p "$WORK/_vlogs"
 mkdir -p "$WORK/_trash"
@@ -98,4 +100,4 @@ EVENTSEOF
 fi
 
 echo "✓ Created directory skeleton in $WORK"
-echo "  inbox/  by-date/  screenshots/  _favorite/  _vlogs/  _trash/  _meta/"
+echo "  inbox/  by-date/  screenshots/  screenrecords/  docs/  _favorite/  _vlogs/  _trash/  _meta/"

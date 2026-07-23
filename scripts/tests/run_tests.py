@@ -217,11 +217,12 @@ def main():
         print(f"  ✗ FAIL: rc={rc}, stderr={err}")
 
     # === Test 5: rename_organize detects screen recordings ===
-    section("5. rename_organize.py - recording keyword detection")
+    section("5. rename_organize.py - recording keyword → screenrecords/")
 
     shutil.rmtree(work / 'inbox', ignore_errors=True)
     shutil.rmtree(work / 'by-date', ignore_errors=True)
     shutil.rmtree(work / 'screenshots', ignore_errors=True)
+    shutil.rmtree(work / 'screenrecords', ignore_errors=True)
     work.mkdir(exist_ok=True)
     (work / 'inbox').mkdir(exist_ok=True)
 
@@ -234,26 +235,29 @@ def main():
         '--dry-run'
     ])
     if rc == 0:
-        if 'screenshots/' in out and 'RPReplay' in out:
-            print("  ✓ RPReplay_Final_xxx.mov routed to screenshots/")
-        if 'Screenrecorder' in out and 'screenshots/' in out:
-            print("  ✓ Screenrecorder_xxx.mp4 routed to screenshots/")
+        # RPReplay has no "record" keyword but no Make/GPS → screenrecords via rule 2
+        if 'screenrecords/' in out and ('RPReplay' in out or 'screenrecorder_' in out):
+            print("  ✓ RPReplay / recording routed to screenrecords/")
+        else:
+            print(f"  ✗ FAIL: RPReplay not in screenrecords/, output: {out}")
+        if 'Screenrecorder' in out and 'screenrecords/' in out:
+            print("  ✓ Screenrecorder_xxx.mp4 routed to screenrecords/")
+        else:
+            print(f"  ✗ FAIL: Screenrecorder path, output: {out}")
     else:
         print(f"  ✗ FAIL: rc={rc}, stderr={err}")
 
-    # === Test 6: rename_organize no-GPS + no-make rule (v6 default: off) ===
-    section("6. rename_organize.py - no-GPS rule (v6 default: off)")
+    # === Test 6: rename_organize no-GPS image → screenshots (v7 default on) ===
+    section("6. rename_organize.py - no-GPS image → screenshots/ (v7)")
 
     shutil.rmtree(work / 'inbox', ignore_errors=True)
     shutil.rmtree(work / 'by-date', ignore_errors=True)
     shutil.rmtree(work / 'screenshots', ignore_errors=True)
+    shutil.rmtree(work / 'screenrecords', ignore_errors=True)
     work.mkdir(exist_ok=True)
     (work / 'inbox').mkdir(exist_ok=True)
 
-    # Image with no EXIF (no Make, no GPS).
-    # Filename "image.png" doesn't match any camera pattern (Rule 0),
-    # so Rule 2 (no-GPS) actually fires when --no-gps-rule is set.
-    # v6 default: rule is OFF -> file is treated as normal photo, not screenshot.
+    # Image with no EXIF (no GPS). Filename "image.png" is not a camera pattern.
     make_png(inbox / 'image.png')
 
     rc, out, err = run([
@@ -261,23 +265,51 @@ def main():
         '--work', str(work),
         '--dry-run'
     ])
-    if rc == 0 and 'screenshots/' not in out and 'by-date/' in out:
-        print("  ✓ PNG without EXIF routed to by-date/ (v6 default: not screenshot)")
+    if rc == 0 and 'screenshots/' in out:
+        print("  ✓ PNG without GPS routed to screenshots/ (v7)")
     else:
         print(f"  ✗ FAIL: output: {out}")
 
-    # Opt-in: with --no-gps-rule, the same file should be classified as screenshot.
-    shutil.rmtree(work / 'by-date', ignore_errors=True)
+    # Camera-named video without metadata stays by-date (rule 0)
+    shutil.rmtree(work / 'inbox', ignore_errors=True)
+    (work / 'inbox').mkdir(exist_ok=True)
+    (inbox / 'VID_20240715_140012.mp4').write_bytes(b'fake mp4 content')
     rc, out, err = run([
         'python3', str(SCRIPTS / 'rename_organize.py'),
         '--work', str(work),
-        '--dry-run',
-        '--no-gps-rule'
+        '--dry-run'
     ])
-    if rc == 0 and 'screenshots/' in out:
-        print("  ✓ --no-gps-rule opt-in still routes PNG to screenshots/")
+    if rc == 0 and 'by-date/' in out and 'screenrecords/' not in out:
+        print("  ✓ VID_ camera video stays in by-date/")
     else:
-        print(f"  ✗ FAIL with --no-gps-rule: output: {out}")
+        print(f"  ✗ FAIL VID_ routing: {out}")
+
+    # === Test 6b: reclassify helpers ===
+    section("6b. rename_organize.reclassify_paths")
+    import rename_organize as ro
+    shutil.rmtree(work / 'inbox', ignore_errors=True)
+    shutil.rmtree(work / 'by-date', ignore_errors=True)
+    shutil.rmtree(work / 'screenshots', ignore_errors=True)
+    shutil.rmtree(work / 'screenrecords', ignore_errors=True)
+    (work / 'by-date' / '2024' / '2024-07' / 'photos').mkdir(parents=True)
+    sample = work / 'by-date' / '2024' / '2024-07' / 'photos' / '20240715_a1b2.jpg'
+    sample.write_bytes(b'fake jpg')
+    rel = str(sample.relative_to(work))
+    results = ro.reclassify_paths(work, [rel], 'to_screen', dry_run=False)
+    if results and results[0].get('ok') and str(results[0].get('dest', '')).startswith('screenshots/'):
+        print("  ✓ to_screen moved image into screenshots/")
+        to_docs = ro.reclassify_paths(work, [results[0]['dest']], 'to_docs', dry_run=False)
+        if to_docs and to_docs[0].get('ok') and str(to_docs[0].get('dest', '')).startswith('docs/'):
+            print("  ✓ to_docs moved into docs/")
+            back = ro.reclassify_paths(work, [to_docs[0]['dest']], 'to_normal', dry_run=False)
+            if back and back[0].get('ok') and 'by-date/' in str(back[0].get('dest', '')):
+                print("  ✓ to_normal moved image back to by-date/")
+            else:
+                print(f"  ✗ FAIL to_normal: {back}")
+        else:
+            print(f"  ✗ FAIL to_docs: {to_docs}")
+    else:
+        print(f"  ✗ FAIL to_screen: {results}")
 
     # === Test 7: rename_organize real photo with Make goes to by-date ===
     section("7. rename_organize.py - real photo with Make goes to by-date")
@@ -406,7 +438,7 @@ def main():
         '--work', str(work2)
     ])
     if rc == 0:
-        for d in ('inbox', 'by-date', 'screenshots', '_favorite', '_vlogs', '_trash', '_meta'):
+        for d in ('inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', '_favorite', '_vlogs', '_trash', '_meta'):
             if (work2 / d).exists():
                 print(f"  ✓ Created {d}/")
             else:

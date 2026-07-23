@@ -148,31 +148,36 @@ folders:
   bucket_subdirs: [photos, videos]
 
 # ============================================================
-# 截图/录屏检测配置（v4 加录屏关键字）
+# 截图/录屏检测配置（v7：双桶）
 # ============================================================
+# 实际逻辑在 rename_organize.py（classify_capture v7）；本段为文档/示例对齐。
 screenshot_detection:
   enabled: true
-  
-  # 文件名关键字列表（任一匹配即识别为截图/录屏）
-  # 大小写不敏感、子串匹配
-  keywords:
-    - screenshot            # iPhone/Android 截图
-    - screenrecording       # macOS/iOS 录屏
-    - "screen recording"    # 带空格
-    - screenrecord          # Android 内置录屏
-    - screenrecorder        # 第三方 Android 录屏 app
-    - screencapture         # Linux 工具
-    - "screen capture"      # 带空格
-    - rpreplay              # iOS 控制中心录屏默认前缀
-  
-  output_dir: screenshots        # 归档根目录
-  
-  # GPS 启发式（v3 引入）
-  # 规则: 无 EXIF GPS + 无镜头厂商信息 → 判为截图/录屏
-  no_gps_as_screenshot: true     # 默认 true；误判多可改 false
-  
-  # 命名模板（统一加 screenshot_ 前缀）
-  naming_template: "screenshot_{date}_{source?}_{hash}.ext"
+  version: 7
+
+  # 图：文件名含 screenshot → screenshots/
+  screenshot_keywords:
+    - screenshot
+
+  # 视频：文件名含 record（子串）→ screenrecords/
+  recording_keywords:
+    - record
+
+  # 输出目录（分桶）
+  screenshots_dir: screenshots
+  screenrecords_dir: screenrecords
+
+  # v7 始终开启：图无 GPS → 截图；视频（无 Make ∨ 无 GPS）→ 录屏
+  # --no-gps-rule 已废弃（CLI 保留但无效）
+  aggressive_gps_make_rules: true
+
+  # 相机文件名白名单优先 → by-date（见 rename_organize.CAMERA_FILENAME_PATTERNS）
+  camera_filename_whitelist: true
+
+  naming:
+    screenshot: "screenshot_{date}_{source?}_{hash}.ext"
+    recording:  "screenrecorder_{date}_{source?}_{hash}.ext"
+    normal:     "{date}_{source?}_{hash}.ext"
 
 # ============================================================
 # 命名配置
@@ -180,6 +185,7 @@ screenshot_detection:
 naming:
   photo_template:        "{date}_{source?}_{hash}.ext"
   screenshot_template:   "screenshot_{date}_{source?}_{hash}.ext"
+  recording_template:    "screenrecorder_{date}_{source?}_{hash}.ext"
 
 # ============================================================
 # rsync 镜像配置
@@ -189,6 +195,8 @@ sync:
   include_paths:
     - by-date
     - screenshots
+    - screenrecords
+    - docs
     - _favorite
     - _vlogs
 
@@ -220,10 +228,11 @@ web_browse:
   # 默认排序
   default_sort: capture    # capture | mtime | name
 
-  # 缩略图生成工具
-  # sips: macOS 内置（推荐）
-  # pil: Python PIL（HEIC 支持有限）
+  # 缩略图生成工具：sips（macOS 内置，推荐）| pil
   thumb_tool: sips
+
+  # 双向纠错：POST /api/reclassify {action: to_screen|to_normal, paths:[...]}
+  reclassify: true
 
 # ============================================================
 # AppleScript / Photos 集成配置

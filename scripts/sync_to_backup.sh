@@ -34,7 +34,7 @@ Usage: sync_to_backup.sh [--work PATH] [--backup PATH] [--dry-run] [--verify] [-
 
 Modes:
   (default)     Append-only mirror: only adds new files to backup, never deletes.
-  --verify      After mirror, run a checksum-based verification.
+  --verify      After a real mirror, verify with size/mtime (skipped under --dry-run).
   --prune       DANGEROUS: also delete files from backup that are not on work disk.
                 Requires --confirm to actually run.
 
@@ -42,6 +42,7 @@ Examples:
   sync_to_backup.sh                    # mirror work -> backup
   sync_to_backup.sh --dry-run          # preview what would be mirrored
   sync_to_backup.sh --verify           # mirror + verify
+  sync_to_backup.sh --verify --dry-run # preview only; verify is skipped
   sync_to_backup.sh --prune --confirm  # mirror + delete orphans on backup
 USAGE
             exit 0 ;;
@@ -71,6 +72,8 @@ RSYNC_ARGS=(
     -avh $DRY_RUN
     --include='by-date/***'
     --include='screenshots/***'
+    --include='screenrecords/***'
+    --include='docs/***'
     --include='_favorite/***'
     --include='_vlogs/***'
     --exclude='*'
@@ -96,26 +99,40 @@ fi
 
 # Mirror
 echo "→ Mirroring $WORK -> $BACKUP"
-echo "  Including: by-date/, screenshots/, _favorite/, _vlogs/"
+echo "  Including: by-date/, screenshots/, screenrecords/, docs/, _favorite/, _vlogs/"
 rsync "${RSYNC_ARGS[@]}" "$WORK/" "$BACKUP/" || {
     echo "ERROR: rsync failed" >&2
     exit 1
 }
 
-# Optional verify
+# Optional verify (skip when --dry-run: nothing was written, checksum would
+# scan the whole library for minutes/hours and always report "differences")
 if [[ "$VERIFY" == "verify" ]]; then
-    echo ""
-    echo "→ Verifying (checksum compare)..."
-    rsync -avhcn --include='by-date/***' --include='screenshots/***' \
-          --include='_favorite/***' --include='_vlogs/***' --exclude='*' \
-          "$WORK/" "$BACKUP/" > /tmp/sync-verify.log 2>&1 || true
-    if [[ -s /tmp/sync-verify.log ]]; then
-        echo "⚠️  Differences detected:"
-        head -20 /tmp/sync-verify.log
-        echo "Full log: /tmp/sync-verify.log"
-        exit 1
+    if [[ -n "$DRY_RUN" ]]; then
+        echo ""
+        echo "→ Skipping verify under --dry-run (no files written; checksum compare is meaningless and very slow)."
+        echo "  Dry-run preview above is the source of truth. Use Apply (without --dry-run) for real sync + verify."
     else
-        echo "✓ Verification passed: all checksums match"
+        echo ""
+        echo "→ Verifying (size/mtime compare, no full checksum)..."
+        # -n dry compare; no -c (checksum) — full checksum on multi-10GB libs is too slow.
+        # Fail only on real file-level itemize lines, not rsync chatter / dir headers.
+        VERIFY_LOG="${TMPDIR:-/tmp}/picvault-sync-verify-$$.log"
+        rsync -avhn --itemize-changes \
+              --include='by-date/***' --include='screenshots/***' \
+              --include='screenrecords/***' --include='docs/***' \
+              --include='_favorite/***' --include='_vlogs/***' --exclude='*' \
+              "$WORK/" "$BACKUP/" > "$VERIFY_LOG" 2>&1 || true
+        if grep -E '^[<>ch.*][fLDS]' "$VERIFY_LOG" >/dev/null 2>&1 || \
+           grep -E '^\*deleting' "$VERIFY_LOG" >/dev/null 2>&1; then
+            echo "⚠️  Differences detected:"
+            grep -E '^[<>ch.*][fLDS]|^\*deleting' "$VERIFY_LOG" | head -30
+            echo "Full log: $VERIFY_LOG"
+            exit 1
+        else
+            echo "✓ Verification passed: no pending file differences"
+            rm -f "$VERIFY_LOG"
+        fi
     fi
 fi
 

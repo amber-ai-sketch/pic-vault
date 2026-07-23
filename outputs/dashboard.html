@@ -3,293 +3,1133 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>PicVault — 控制面板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #fafafa;
-    --card: #fff;
-    --text: #222;
-    --muted: #888;
-    --accent: #0066cc;
-    --green: #2e7d32;
-    --yellow: #f57c00;
-    --red: #c62828;
-    --border: #e0e0e0;
-    --code-bg: #f5f5f5;
-    --danger-bg: #fff5f5;
+    --paper: #C8D0D8;
+    --ink: #15202B;
+    --cyan: #178A9C;
+    --live: #1F7A4D;
+    --warn: #B87614;
+    --hazard: #A83428;
+    --rail: #E8EEF2;
+    --muted: #5A6A78;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #1e1e1e; --card: #2a2a2a; --text: #e0e0e0; --muted: #888;
-      --accent: #4ea3ff; --border: #3a3a3a; --code-bg: #1a1a1a;
-      --danger-bg: #3a2020;
-    }
-  }
+
   * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
   body {
-    margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    font-family: "Figtree", sans-serif;
+    color: var(--ink);
+    line-height: 1.5;
+    background-color: var(--paper);
+    background-image:
+      radial-gradient(rgba(21, 32, 43, 0.045) 0.6px, transparent 0.6px),
+      repeating-linear-gradient(
+        -28deg,
+        transparent 0,
+        transparent 11px,
+        rgba(21, 32, 43, 0.028) 11px,
+        rgba(21, 32, 43, 0.028) 12px
+      );
+    background-size: 4px 4px, auto;
+    min-height: 100vh;
   }
-  header {
-    background: var(--card); border-bottom: 1px solid var(--border);
-    padding: 16px 24px; display: flex; align-items: center;
-    justify-content: space-between; flex-wrap: wrap; gap: 12px;
+
+  a { color: var(--cyan); }
+
+  :focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
   }
-  header h1 { margin: 0; font-size: 22px; }
-  .web-status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
-  .web-status .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  .web-status .dot.running { background: var(--green); }
-  .web-status .dot.stopped { background: var(--muted); }
-  .container {
-    display: grid; grid-template-columns: 320px 1fr;
-    gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto;
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 28px 24px 48px;
   }
-  @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+
+  /* —— Header —— */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px 32px;
+    align-items: end;
+    padding-bottom: 28px;
+    border-bottom: 1px solid rgba(21, 32, 43, 0.18);
   }
-  .card h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
-  .stat { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
-  .stat .label { color: var(--muted); }
-  .stat .value { font-weight: 600; font-family: ui-monospace, "SF Mono", monospace; }
-  .step {
-    margin-bottom: 14px; padding: 12px;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+
+  .brand {
+    font-family: "Syne", sans-serif;
+    font-weight: 800;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin: 0;
+    color: var(--ink);
   }
-  .step .step-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .step .step-num {
-    background: var(--accent); color: #fff; width: 22px; height: 22px;
-    border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 600; flex-shrink: 0;
+
+  .tagline {
+    margin: 10px 0 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+    max-width: 36em;
   }
-  .step .step-title { font-weight: 600; font-size: 14px; }
-  .step .step-desc { font-size: 13px; color: var(--muted); margin: 4px 0 8px 30px; }
+
+  .web-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .web-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .dot.running { background: var(--live); }
+  .dot.stopped { background: var(--muted); }
+
+  /* —— Paths —— */
+  .paths-panel {
+    margin-top: 28px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(21, 32, 43, 0.14);
+  }
+
+  .paths-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .paths-summary {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 16px;
+  }
+  .paths-summary.visible { display: flex; }
+
+  .path-line {
+    display: grid;
+    grid-template-columns: 7.5em 1fr;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 0.82rem;
+  }
+
+  .path-line .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .path-line .v {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    color: var(--ink);
+    word-break: break-all;
+  }
+
+  .paths-form {
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 18px;
+  }
+  .paths-form.visible { display: flex; }
+
+  .path-field label {
+    display: block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .path-field .hint {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+
+  .path-field input {
+    width: 100%;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+    padding: 8px 10px;
+    border: 1px solid rgba(21, 32, 43, 0.22);
+    border-radius: 2px;
+    background: var(--rail);
+    color: var(--ink);
+  }
+  .path-field input:focus {
+    outline: none;
+    border-color: var(--cyan);
+  }
+  .path-field input::placeholder {
+    color: rgba(90, 106, 120, 0.7);
+  }
+
+  .path-field .path-auto {
+    margin: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+    padding: 8px 10px;
+    border: 1px dashed rgba(21, 32, 43, 0.2);
+    border-radius: 2px;
+    background: rgba(232, 238, 242, 0.4);
+    color: var(--ink);
+    word-break: break-all;
+  }
+
+  .path-field .hint.warn {
+    color: var(--warn);
+    margin-top: 6px;
+  }
+
+  .path-field .hint code,
+  .path-field .hint.warn code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+  }
+
+  .paths-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+
+  /* —— Contact sheet —— */
+  .contact-sheet-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 28px 0 12px;
+  }
+
+  .section-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .contact-sheet {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid rgba(21, 32, 43, 0.22);
+    border-top: 3px solid var(--cyan);
+    background: rgba(232, 238, 242, 0.55);
+    scrollbar-width: thin;
+  }
+
+  .frame {
+    flex: 1 0 auto;
+    min-width: 96px;
+    padding: 14px 16px 12px;
+    border-right: 1px solid rgba(21, 32, 43, 0.16);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    opacity: 0;
+    transform: translateY(10px);
+    animation: frameIn 0.45s ease forwards;
+  }
+  .frame:last-child { border-right: none; }
+  .frame:nth-child(1) { animation-delay: 0.05s; }
+  .frame:nth-child(2) { animation-delay: 0.1s; }
+  .frame:nth-child(3) { animation-delay: 0.15s; }
+  .frame:nth-child(4) { animation-delay: 0.2s; }
+  .frame:nth-child(5) { animation-delay: 0.25s; }
+  .frame:nth-child(6) { animation-delay: 0.3s; }
+  .frame:nth-child(7) { animation-delay: 0.35s; }
+
+  @keyframes frameIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .frame .label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-transform: lowercase;
+  }
+
+  .frame .value {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+    font-size: 1.35rem;
+    color: var(--ink);
+    line-height: 1.1;
+  }
+
+  /* —— Alert —— */
+  .alert {
+    display: none;
+    margin-top: 20px;
+    padding: 14px 16px;
+    border-left: 3px solid var(--hazard);
+    background: rgba(168, 52, 40, 0.08);
+  }
+  .alert.warn {
+    border-left-color: var(--warn);
+    background: rgba(184, 118, 20, 0.1);
+  }
+  .alert.visible { display: block; }
+
+  .alert p {
+    margin: 0 0 10px;
+    font-size: 0.9rem;
+  }
+
   code.cmd {
-    display: block; background: var(--code-bg); padding: 8px 10px;
-    border-radius: 4px; font-family: ui-monospace, "SF Mono", "Menlo", monospace;
-    font-size: 12px; overflow-x: auto; white-space: pre; word-break: break-all;
+    display: block;
+    background: var(--rail);
+    padding: 10px 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    white-space: pre;
+    border: 1px solid rgba(21, 32, 43, 0.12);
+    color: var(--ink);
   }
-  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+
+  /* —— Buttons —— */
   button {
-    border: 1px solid var(--border); background: var(--card); color: var(--text);
-    padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
-    font-family: inherit; transition: all 0.15s;
+    border: 1px solid rgba(21, 32, 43, 0.28);
+    background: var(--rail);
+    color: var(--ink);
+    padding: 6px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: "Figtree", sans-serif;
+    font-weight: 600;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease, color 0.15s ease;
   }
-  button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:hover:not(:disabled) {
+    border-color: var(--cyan);
+    transform: translateY(-1px);
+  }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.copied { background: var(--green); color: #fff; border-color: var(--green); }
-  button.danger:hover { background: var(--red); border-color: var(--red); }
-  button.success:hover { background: var(--green); border-color: var(--green); }
-  .tip {
-    background: var(--code-bg); border-left: 3px solid var(--accent);
-    padding: 8px 12px; margin: 8px 0; font-size: 13px;
-    border-radius: 0 4px 4px 0;
+  button.copied {
+    background: var(--live);
+    color: #fff;
+    border-color: var(--live);
   }
-  .tip.warn { border-left-color: var(--yellow); background: var(--code-bg); }
-  .tip.danger { border-left-color: var(--red); background: var(--danger-bg); }
-  #outputPanel { display: none; }
+  button.primary {
+    background: var(--cyan);
+    color: #fff;
+    border-color: var(--cyan);
+  }
+  button.primary:hover:not(:disabled) {
+    background: #147a8a;
+    border-color: #147a8a;
+  }
+  button.danger {
+    border-color: var(--hazard);
+    color: var(--hazard);
+    background: transparent;
+  }
+  button.danger:hover:not(:disabled) {
+    background: var(--hazard);
+    color: #fff;
+    border-color: var(--hazard);
+  }
+  button.ghost {
+    background: transparent;
+  }
+
+  /* —— Pipeline + sprocket —— */
+  .pipeline-section {
+    margin-top: 36px;
+  }
+
+  .pipeline-head {
+    margin-bottom: 16px;
+  }
+
+  .pipeline-title {
+    font-family: "Syne", sans-serif;
+    font-weight: 700;
+    font-size: 1.35rem;
+    margin: 4px 0 0;
+    letter-spacing: -0.02em;
+  }
+
+  .pipeline-progress {
+    margin: 6px 0 0;
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+
+  .pipeline {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 0 18px;
+  }
+
+  .sprocket {
+    position: relative;
+    width: 22px;
+    background: rgba(21, 32, 43, 0.16);
+    border-radius: 1px;
+  }
+
+  .sprocket::before {
+    content: "";
+    position: absolute;
+    inset: 6px 0;
+    background-image: radial-gradient(circle, var(--paper) 4px, transparent 4.2px);
+    background-size: 22px 20px;
+    background-position: center 0;
+    background-repeat: repeat-y;
+    opacity: 0.92;
+  }
+
+  body.web-live .sprocket {
+    background: rgba(23, 138, 156, 0.28);
+  }
+
+  body.web-live .sprocket::before {
+    animation: sprocketBreath 2.8s ease-in-out infinite;
+  }
+
+  @keyframes sprocketBreath {
+    0%, 100% { opacity: 0.65; }
+    50% { opacity: 1; }
+  }
+
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .step {
+    padding: 18px 0 18px 12px;
+    border-bottom: 1px solid rgba(21, 32, 43, 0.14);
+    border-left: 3px solid transparent;
+    transition: border-color 0.15s ease;
+  }
+  .step:first-child { padding-top: 4px; }
+  .step:last-child { border-bottom: none; }
+  .step:hover { border-bottom-color: var(--cyan); }
+  .step.done { border-left-color: var(--live); }
+  .step.running { border-left-color: var(--cyan); }
+
+  .step-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .step-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--cyan);
+    min-width: 1.5em;
+  }
+
+  .step-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .step-desc {
+    font-size: 0.875rem;
+    color: var(--muted);
+    margin: 0 0 10px 2.1em;
+  }
+  .step-desc code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+    color: var(--ink);
+    background: var(--rail);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  .step .cmd {
+    margin-left: 2.1em;
+  }
+
+  .step .btn-row {
+    margin-left: 2.1em;
+  }
+
+  .step-note {
+    margin: 10px 0 0 2.1em;
+    font-size: 0.8rem;
+    color: var(--warn);
+  }
+
+  .step-status {
+    margin: 0 0 10px 2.1em;
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+  .step-status.ok { color: var(--live); }
+  .step-status.need { color: var(--warn); }
+
+  .web-status .btn-row {
+    margin-top: 0;
+    justify-content: flex-end;
+  }
+
+  /* —— Output —— */
+  #outputPanel {
+    display: none;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(21, 32, 43, 0.18);
+  }
+
+  #outputPanel h2 {
+    font-family: "Syne", sans-serif;
+    font-weight: 700;
+    font-size: 1.15rem;
+    margin: 0;
+  }
+
+  #outputPanel .output-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin: 0 0 12px;
+  }
+
   #outputPanel .output-meta {
-    font-size: 12px; color: var(--muted); margin-bottom: 6px;
-    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+    font-family: "JetBrains Mono", monospace;
   }
+
   #outputPanel pre {
-    background: var(--code-bg); padding: 10px; border-radius: 4px;
-    font-family: ui-monospace, "SF Mono", monospace; font-size: 12px;
-    overflow-x: auto; max-height: 400px; overflow-y: auto; white-space: pre-wrap;
-    margin: 4px 0;
+    background: var(--rail);
+    padding: 10px 12px;
+    border-radius: 2px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    margin: 6px 0;
+    border: 1px solid rgba(21, 32, 43, 0.1);
   }
-  #outputPanel pre.stderr { border-left: 3px solid var(--red); }
-  #outputPanel .ok { color: var(--green); font-weight: 600; }
-  #outputPanel .err { color: var(--red); font-weight: 600; }
+
+  #outputPanel pre.stderr {
+    border-left: 3px solid var(--hazard);
+  }
+
+  #outputPanel .ok { color: var(--live); font-weight: 600; }
+  #outputPanel .err { color: var(--hazard); font-weight: 600; }
+
+  /* —— Footer —— */
+  .footer-tip {
+    margin-top: 36px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(21, 32, 43, 0.14);
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* —— Responsive —— */
+  @media (max-width: 720px) {
+    .wrap { padding: 20px 16px 40px; }
+    .masthead {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+    .web-status { align-items: flex-start; }
+    .path-line { grid-template-columns: 1fr; gap: 2px; }
+    .pipeline { grid-template-columns: 12px 1fr; gap: 0 12px; }
+    .sprocket { width: 12px; }
+    .sprocket::before {
+      background-size: 12px 16px;
+      background-image: radial-gradient(circle, var(--paper) 2.5px, transparent 2.6px);
+    }
+    .step-desc,
+    .step .cmd,
+    .step .btn-row,
+    .step-note,
+    .step-status { margin-left: 0; }
+  }
+
+  @media (max-width: 480px) {
+    .pipeline { grid-template-columns: 1fr; }
+    .sprocket { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .frame {
+      opacity: 1;
+      transform: none;
+      animation: none;
+    }
+    body.web-live .sprocket::before { animation: none; }
+    button { transition: none; }
+    button:hover:not(:disabled) { transform: none; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>📦 PicVault</h1>
-  <div class="web-status">
-    <span class="dot stopped" id="webDot"></span>
-    <span id="webStatus">Web UI: 检查中...</span>
-    <button id="openWebBtn" style="display:none" onclick="openWeb()">🌐 打开</button>
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <h1 class="brand">PicVault</h1>
+      <p class="tagline">个人照片/视频库本地流水线控制台 — 看清各桶数量，按序执行 inbox 到备份。</p>
+    </div>
+    <div class="web-status">
+      <div class="web-status-row">
+        <span class="dot stopped" id="webDot"></span>
+        <span id="webStatus">Web UI: 检查中...</span>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="ghost" onclick="copyRestartCmd()">复制重启命令</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="paths-panel" id="pathsPanel" aria-label="路径配置">
+    <div class="paths-head">
+      <p class="section-label">Paths</p>
+      <button type="button" class="ghost" id="pathsEditBtn" onclick="beginEditPaths()" style="display:none">编辑路径</button>
+    </div>
+
+    <div class="paths-summary" id="pathsSummary">
+      <div class="path-line">
+        <span class="k">PROJECT_ROOT</span>
+        <span class="v" id="sumProjectRoot"></span>
+      </div>
+      <div class="path-line">
+        <span class="k">WORK</span>
+        <span class="v" id="sumWork"></span>
+      </div>
+      <div class="path-line">
+        <span class="k">BACKUP</span>
+        <span class="v" id="sumBackup"></span>
+      </div>
+    </div>
+
+    <form class="paths-form visible" id="pathsForm" onsubmit="return savePaths(event)">
+      <div class="path-field">
+        <label>PROJECT_ROOT</label>
+        <p class="hint">自动识别：本文件位于仓库的 <code>outputs/</code> 下，根目录取其上级。无需填写。</p>
+        <p class="path-auto" id="autoProjectRoot"></p>
+        <p class="hint warn" id="projectRootWarn" hidden>无法从当前 URL 识别仓库根。请用 Finder / <code>open outputs/dashboard.html</code> 以本地文件方式打开本页。</p>
+      </div>
+      <div class="path-field">
+        <label for="inputWork">WORK</label>
+        <p class="hint">工作盘根目录（含 inbox / by-date 等）。例：/Volumes/Storage</p>
+        <input id="inputWork" type="text" autocomplete="off" spellcheck="false"
+               placeholder="/Volumes/Storage">
+      </div>
+      <div class="path-field">
+        <label for="inputBackup">BACKUP</label>
+        <p class="hint">备份盘根目录。例：/Volumes/WD4T/MediaVault</p>
+        <input id="inputBackup" type="text" autocomplete="off" spellcheck="false"
+               placeholder="/Volumes/WD4T/MediaVault">
+      </div>
+      <div class="paths-actions">
+        <button type="submit" class="primary">保存路径</button>
+        <button type="button" class="ghost" id="pathsCancelBtn" onclick="cancelEditPaths()" style="display:none">取消</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="contact-sheet-head">
+    <p class="section-label">Contact sheet</p>
+    <button class="ghost" onclick="pollStatus()">刷新</button>
   </div>
-</header>
 
-<div class="container">
-
-  <!-- 左：状态 + 启动提示 -->
-  <div>
-    <div class="card" id="webNotRunningCard" style="display:none">
-      <h2>⚠ Web UI 未启动</h2>
-      <div class="tip danger">
-        状态面板为空、Run 按钮无效都是因为 Web UI 没跑。<br>
-        请在终端执行（一行）：
-      </div>
-      <code class="cmd" id="startCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('startCmd')">📋 复制启动命令</button>
-      </div>
-      <div class="tip warn" style="margin-top:12px">
-        跑完后本页面会自动检测到 Web UI 已启动（最多 5 秒），状态面板会自动刷新。
-      </div>
+  <div class="contact-sheet" role="group" aria-label="各桶计数">
+    <div class="frame">
+      <span class="label">inbox</span>
+      <span class="value" id="inbox">–</span>
     </div>
-
-    <div class="card">
-      <h2>📊 状态</h2>
-      <div class="stat"><span class="label">inbox</span><span class="value" id="inbox">–</span></div>
-      <div class="stat"><span class="label">by-date</span><span class="value" id="byDate">–</span></div>
-      <div class="stat"><span class="label">screenshots</span><span class="value" id="screenshots">–</span></div>
-      <div class="stat"><span class="label">vlogs</span><span class="value" id="vlogs">–</span></div>
-      <div class="stat"><span class="label">trash</span><span class="value" id="trash">–</span></div>
-      <div class="stat"><span class="label">starred</span><span class="value" id="starred">–</span></div>
-      <div class="stat"><span class="label">last sync</span><span class="value" id="lastSync">–</span></div>
-      <div class="btn-row">
-        <button onclick="pollStatus()">🔄 手动刷新</button>
-      </div>
+    <div class="frame">
+      <span class="label">by-date</span>
+      <span class="value" id="byDate">–</span>
     </div>
-
-    <div class="card">
-      <h2>💡 提示</h2>
-      <div class="tip">每条命令旁都展示<strong>绝对路径</strong>，复制后直接贴终端即可，不用 cd 也不用配 PATH。</div>
-      <div class="tip">无破坏性的操作有 <strong>▶ Run</strong> 按钮直接跑；会动文件的操作（dedupe --yes、rename --yes、sync --yes、pipeline --yes）点 Run 前会弹确认。</div>
-      <div class="tip warn">首次跑前建议先 <strong>▶ Dry-run</strong> 看输出。</div>
-      <div class="tip">状态每 5 秒自动刷新；点 Run 后成功后也会立即刷新。</div>
+    <div class="frame">
+      <span class="label">screenshots</span>
+      <span class="value" id="screenshots">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">screenrecords</span>
+      <span class="value" id="screenrecords">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">docs</span>
+      <span class="value" id="docs">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">vlogs</span>
+      <span class="value" id="vlogs">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">trash</span>
+      <span class="value" id="trash">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">starred</span>
+      <span class="value" id="starred">–</span>
+    </div>
+    <div class="frame">
+      <span class="label">last sync</span>
+      <span class="value" id="lastSync">–</span>
     </div>
   </div>
 
-  <!-- 右：6 步流程 -->
-  <div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">1</span>
-        <span class="step-title">把照片/视频拖到 inbox</span>
-      </div>
-      <div class="step-desc">手动拖到 <code id="inboxPath"></code>，子目录随意。无需命令。</div>
+  <div class="alert" id="webNotRunningCard">
+    <p>Web UI 未启动：接触印样计数为空，Dry-run / 运行按钮也无法连上服务。请在终端执行下面一行命令；启动后本页最多约 5 秒内自动检测并刷新。</p>
+    <code class="cmd" id="startCmd"></code>
+    <div class="btn-row">
+      <button onclick="copyText('startCmd')">复制启动命令</button>
     </div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">2</span>
-        <span class="step-title">去重（SHA-256 字节级）</span>
-      </div>
-      <code class="cmd" id="dedupeDryCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('dedupeDryCmd')">📋 复制</button>
-        <button onclick="runCommand(this, 'dedupe_dry')">▶ Dry-run</button>
-        <button class="danger" onclick="runApply(this, 'dedupe_apply', '把 inbox 里所有 SHA-256 重复的文件移入 _trash/，保留最大的一份。继续？')">⚠ Apply（动文件）</button>
-      </div>
-    </div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">3</span>
-        <span class="step-title">重命名 + 归档到 by-date/</span>
-      </div>
-      <code class="cmd" id="renameDryCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('renameDryCmd')">📋 复制</button>
-        <button onclick="runCommand(this, 'rename_dry')">▶ Dry-run</button>
-        <button class="danger" onclick="runApply(this, 'rename_apply', '把 inbox 里的文件重命名 + 移到 by-date/YYYY/MM/[/theme]/。继续？')">⚠ Apply（动文件）</button>
-      </div>
-    </div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">4</span>
-        <span class="step-title">同步到 WD4T 备份盘（rsync）</span>
-      </div>
-      <code class="cmd" id="syncVerifyCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('syncVerifyCmd')">📋 复制</button>
-        <button onclick="runCommand(this, 'sync_verify')">▶ Dry-run</button>
-        <button class="danger" onclick="runApply(this, 'sync_apply', '把工作盘 rsync 镜像到备份盘 /Volumes/WD4T/MediaVault。继续？')">⚠ Apply（动文件）</button>
-      </div>
-    </div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">5</span>
-        <span class="step-title">启动 Web UI 浏览（用于加星标）</span>
-      </div>
-      <code class="cmd" id="webStartCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('webStartCmd')">📋 复制</button>
-        <button onclick="runCommand(this, 'web_start')">▶ Run</button>
-        <button class="danger" onclick="runCommand(this, 'web_stop')">■ Stop</button>
-      </div>
-    </div>
-
-    <div class="step">
-      <div class="step-header">
-        <span class="step-num">6</span>
-        <span class="step-title">一键 pipeline（dedupe + rename + sync）</span>
-      </div>
-      <code class="cmd" id="pipelineCmd"></code>
-      <div class="btn-row">
-        <button onclick="copyText('pipelineCmd')">📋 复制</button>
-        <button class="danger" onclick="runApply(this, 'dedupe_apply', '⚠ 这会真跑 dedupe + rename + sync 整个流水线（移动/同步大量文件）。确认？\n\n继续？')">⚠ Run 全流程</button>
-      </div>
-      <div class="tip warn" style="margin-top:8px">一步到位但不可分段回滚；建议先单独跑 2/3/4 各一步。</div>
-    </div>
-
-    <div class="card" id="outputPanel">
-      <h2>📤 最近输出</h2>
-      <div class="output-meta" id="outputMeta"></div>
-      <pre id="outputCmd"></pre>
-      <div id="outputStatus"></div>
-      <pre id="outputStdout"></pre>
-      <pre id="outputStderr"></pre>
-    </div>
-
   </div>
+
+  <div class="alert warn" id="notInitializedCard">
+    <p>工作盘未初始化：缺少 by-date、_meta 等目录骨架。请先跑下方「00 初始化」；该步骤幂等，不会触碰 inbox 里已有文件。</p>
+  </div>
+
+  <section class="pipeline-section">
+    <div class="pipeline-head">
+      <p class="section-label">Pipeline</p>
+      <h2 class="pipeline-title">顺序流水线</h2>
+      <p class="pipeline-progress" id="pipelineProgress">进度：检测中...</p>
+    </div>
+
+    <div class="pipeline">
+      <div class="sprocket" aria-hidden="true"></div>
+      <div class="steps">
+
+        <div class="step">
+          <div class="step-header">
+            <span class="step-num">00</span>
+            <span class="step-title">初始化工作盘</span>
+          </div>
+          <p class="step-status" id="initStatusLine">状态：检测中...</p>
+          <code class="cmd" id="initCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('initCmd')">复制</button>
+            <button id="initRunBtn" onclick="runInit(this)">运行 init</button>
+          </div>
+          <p class="step-note">创建目录骨架与空 events.yaml；可重复跑；不清空 inbox。</p>
+        </div>
+
+        <div class="step">
+          <div class="step-header">
+            <span class="step-num">01</span>
+            <span class="step-title">把照片/视频拖到 inbox</span>
+          </div>
+          <p class="step-desc">手动拖到 <code id="inboxPath"></code>，子目录随意。无需命令。</p>
+        </div>
+
+        <div class="step" id="stepDedupe">
+          <div class="step-header">
+            <span class="step-num">02</span>
+            <span class="step-title">去重（SHA-256 字节级）</span>
+          </div>
+          <p class="step-status" id="dedupeStepStatus">—</p>
+          <code class="cmd" id="dedupeDryCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('dedupeDryCmd')">复制</button>
+            <button onclick="runCommand(this, 'dedupe_dry')">Dry-run</button>
+            <button class="danger" onclick="runApply(this, 'dedupe_apply', '确定执行去重？\n\n• 找出 inbox 里内容完全相同的文件\n• 相同内容的文件只留体积最大的一份\n• 其余移到 _trash/（可找回，不是永久删除）')">Apply</button>
+          </div>
+        </div>
+
+        <div class="step" id="stepRename">
+          <div class="step-header">
+            <span class="step-num">03</span>
+            <span class="step-title">重命名 + 归档到 by-date/</span>
+          </div>
+          <p class="step-status" id="renameStepStatus">—</p>
+          <code class="cmd" id="renameDryCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('renameDryCmd')">复制</button>
+            <button onclick="runCommand(this, 'rename_dry')">Dry-run</button>
+            <button class="danger" onclick="runApply(this, 'rename_apply', '确定整理归档？\n\n• 按拍摄时间重命名 inbox 里的文件\n• 照片/视频移入 by-date/，截图→screenshots/，录屏→screenrecords/\n• 会从 inbox 搬走文件（不是复制）')">Apply</button>
+          </div>
+        </div>
+
+        <div class="step" id="stepWeb">
+          <div class="step-header">
+            <span class="step-num">04</span>
+            <span class="step-title">启动 Web UI：浏览、加星、删除</span>
+          </div>
+          <p class="step-status" id="webStepStatus">—</p>
+          <p class="step-desc">整理完成后在此浏览核对：加星、纠错分类、移至回收站。做完后再进入第 5 步同步到备份盘（同步默认只增不删，浏览里删掉的文件不会从备份盘清除）。更新代码后请用「复制重启命令」贴到终端执行。</p>
+          <code class="cmd" id="webStartCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('webStartCmd')">复制启动</button>
+            <button type="button" class="ghost" onclick="copyRestartCmd()">复制重启命令</button>
+            <button onclick="runCommand(this, 'web_start')">运行</button>
+            <button class="danger" onclick="runCommand(this, 'web_stop')">停止</button>
+            <button id="openWebBtnStep" class="primary" style="display:none" onclick="openWeb()">打开浏览</button>
+          </div>
+          <p class="step-note">流程：先完成本步浏览整理 → 再去做第 5 步同步。</p>
+        </div>
+
+        <div class="step" id="stepSync">
+          <div class="step-header">
+            <span class="step-num">05</span>
+            <span class="step-title">同步到 WD4T 备份盘（rsync）</span>
+          </div>
+          <p class="step-status" id="syncStepStatus">—</p>
+          <p class="step-desc">请先完成第 4 步 Web 浏览核对，再同步。之后若又在 WebUI 里改过库，可再跑本步，只会把新增/更新补到备份盘。</p>
+          <code class="cmd" id="syncVerifyCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('syncVerifyCmd')">复制</button>
+            <button onclick="runCommand(this, 'sync_verify')">Dry-run</button>
+            <button class="danger" onclick="runApply(this, 'sync_apply', '确定同步到备份盘？\n\n• 建议已完成第 4 步：浏览核对、加星、纠错、回收站\n• 把工作盘的 by-date / screenshots / screenrecords / docs / 收藏 / vlog 镜像到备份盘\n• 默认只新增、不删除备份盘已有文件\n• 可能耗时较长，请保持两块盘都已挂载')">Apply</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-header">
+            <span class="step-num">06</span>
+            <span class="step-title">一键 pipeline（dedupe + rename + sync）</span>
+          </div>
+          <code class="cmd" id="pipelineCmd"></code>
+          <div class="btn-row">
+            <button onclick="copyText('pipelineCmd')">复制</button>
+            <button class="danger" onclick="runApply(this, 'dedupe_apply', '确定一键跑完全流程？\n\n将依次执行：去重 → 整理归档 → 同步备份。\n会移动大量文件且不能分段回滚；建议先单独跑过 02 / 03 / 05（浏览整理放在同步前）。')">运行全流程</button>
+          </div>
+          <p class="step-note">一步到位但不可分段回滚；建议先单独跑 02 / 03 → 04 浏览核对 → 再 05 同步。</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <div id="outputPanel">
+    <div class="output-head">
+      <h2>最近输出</h2>
+      <button type="button" class="ghost" onclick="resumeOrShowLatestRun()">回看最近</button>
+    </div>
+    <div class="output-meta" id="outputMeta"></div>
+    <pre id="outputCmd"></pre>
+    <div id="outputStatus"></div>
+    <pre id="outputStdout"></pre>
+    <pre id="outputStderr" class="stderr"></pre>
+  </div>
+
+  <p class="footer-tip">命令均为绝对路径，复制后可直接贴终端。会动文件的操作（dedupe / rename / sync / pipeline 的 Apply）会先确认；建议先 Dry-run。状态每 5 秒自动刷新。</p>
+
 </div>
 
 <script>
-// ============================================================
-// ⚠️  EDIT ME before first use: replace the three paths below
-//     with your local setup. See README → "Web UI" for details.
-// ============================================================
-const PROJECT_ROOT = '/path/to/picvault';        // e.g. ~/code/PicVault
-const WORK         = '/Volumes/<work-disk>';     // your work disk root
-const BACKUP       = '/Volumes/<backup-disk>';   // your backup disk root
+// WORK / BACKUP placeholders — entered in the Paths form, stored in localStorage.
+// PROJECT_ROOT is auto-detected from this file's location (.../outputs/dashboard.html → repo root).
+const PROJECT_ROOT_PLACEHOLDER = '/path/to/picvault';
+const WORK_PLACEHOLDER         = '/Volumes/WORK_DISK';
+const BACKUP_PLACEHOLDER       = '/Volumes/BACKUP_DISK';
 const API_URL      = 'http://localhost:8765/api/status';
-const RUN_URL      = 'http://localhost:8765/api/run';
-const PICVAULT     = PROJECT_ROOT + '/picvault';
+const API_BASE     = API_URL.replace(/\/api\/status$/, '');
+const RUN_URL      = API_BASE + '/api/run';
+const RUNS_ACTIVE_URL = API_BASE + '/api/runs/active';
+const RUNS_LATEST_URL = API_BASE + '/api/runs/latest';
+function runsMetaUrl(id) {
+  return API_BASE + '/api/runs/' + encodeURIComponent(id);
+}
+function runsLogUrl(id, offset) {
+  return API_BASE + '/api/runs/' + encodeURIComponent(id) +
+    '/log?offset=' + (offset || 0);
+}
 
-// All command strings the dashboard shows. Args are absolute paths so
-// the user can paste them straight into a terminal without cd or PATH setup.
-const CMDS = {
-  inboxPath:       WORK + '/inbox',
-  dedupeDry:       PROJECT_ROOT + '/scripts/dedupe.py --work ' + WORK + ' --dry-run',
-  renameDry:       PROJECT_ROOT + '/scripts/rename_organize.py --work ' + WORK + ' --dry-run',
-  syncVerify:      PROJECT_ROOT + '/scripts/sync_to_backup.sh --work ' + WORK + ' --backup ' + BACKUP + ' --verify --dry-run',
-  webStart:        PICVAULT + ' web start',
-  pipeline:        PICVAULT + ' pipeline --yes',
-  // How to start web server from a terminal (absolute, no PATH needed):
-  startWebTerminal: 'nohup ' + PICVAULT + ' web start > /dev/null 2>&1 &',
+const PATHS_STORAGE_KEY = 'picvault.dashboard.paths';
+const PLACEHOLDER_FRAGMENTS = [
+  PROJECT_ROOT_PLACEHOLDER,
+  WORK_PLACEHOLDER,
+  BACKUP_PLACEHOLDER,
+];
+
+const CMD_IDS = {
+  init: 'initCmd',
+  inboxPath: 'inboxPath',
+  dedupeDry: 'dedupeDryCmd',
+  renameDry: 'renameDryCmd',
+  syncVerify: 'syncVerifyCmd',
+  webStart: 'webStartCmd',
+  pipeline: 'pipelineCmd',
+  startWebTerminal: 'startCmd',
 };
 
-// Hydrate <code>/<pre> elements
-['inboxPath','dedupeDry','renameDry','syncVerify','webStart','pipeline','startWebTerminal']
-  .forEach(k => {
-    const el = document.getElementById({
-      inboxPath:'inboxPath', dedupeDry:'dedupeDryCmd', renameDry:'renameDryCmd',
-      syncVerify:'syncVerifyCmd', webStart:'webStartCmd', pipeline:'pipelineCmd',
-      startWebTerminal:'startCmd'
-    }[k]);
+let paths = {
+  projectRoot: PROJECT_ROOT_PLACEHOLDER,
+  work: WORK_PLACEHOLDER,
+  backup: BACKUP_PLACEHOLDER,
+};
+let PICVAULT = '';
+let CMDS = {};
+
+/** Resolve repo root from .../outputs/dashboard.html (file:// or http with that path). */
+function detectProjectRoot() {
+  try {
+    let path = decodeURIComponent(location.pathname || '');
+    // Windows file:// sometimes yields /C:/...
+    if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
+    const m = path.match(/^(.*)\/outputs\/dashboard\.html$/i);
+    if (m && m[1]) return m[1];
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function currentProjectRoot() {
+  return detectProjectRoot() || PROJECT_ROOT_PLACEHOLDER;
+}
+
+function buildCmds(p) {
+  const picvault = p.projectRoot + '/picvault';
+  return {
+    PICVAULT: picvault,
+    CMDS: {
+      init:            picvault + ' init',
+      inboxPath:       p.work + '/inbox',
+      dedupeDry:       p.projectRoot + '/scripts/dedupe.py --work ' + p.work + ' --dry-run',
+      renameDry:       p.projectRoot + '/scripts/rename_organize.py --work ' + p.work + ' --dry-run',
+      syncVerify:      p.projectRoot + '/scripts/sync_to_backup.sh --work ' + p.work + ' --backup ' + p.backup + ' --verify --dry-run',
+      webStart:        picvault + ' web start',
+      webRestart:      picvault + ' web stop; sleep 1; nohup ' + picvault + ' web start > /dev/null 2>&1 &',
+      pipeline:        picvault + ' pipeline --yes',
+      startWebTerminal: 'nohup ' + picvault + ' web start > /dev/null 2>&1 &',
+    },
+  };
+}
+
+function applyPaths(p) {
+  paths = {
+    projectRoot: p.projectRoot,
+    work: p.work,
+    backup: p.backup,
+  };
+  const built = buildCmds(paths);
+  PICVAULT = built.PICVAULT;
+  CMDS = built.CMDS;
+  hydrateCmds();
+  refreshProjectRootDisplay();
+}
+
+function hydrateCmds() {
+  Object.keys(CMD_IDS).forEach(k => {
+    const el = document.getElementById(CMD_IDS[k]);
     if (el) el.textContent = CMDS[k];
   });
+}
 
-// ============================================================
-// Copy helper
-// ============================================================
+function isDiskConfigured(p) {
+  if (!p) return false;
+  const work = String(p.work || '').trim();
+  const backup = String(p.backup || '').trim();
+  if (!work || !backup) return false;
+  if (work === WORK_PLACEHOLDER || backup === BACKUP_PLACEHOLDER) return false;
+  return true;
+}
+
+function isConfigured(p) {
+  if (!isDiskConfigured(p)) return false;
+  const root = String(p.projectRoot || '').trim();
+  return !!root && root !== PROJECT_ROOT_PLACEHOLDER;
+}
+
+function loadStoredPaths() {
+  try {
+    const raw = localStorage.getItem(PATHS_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return null;
+    return {
+      work: String(data.work || ''),
+      backup: String(data.backup || ''),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function persistPaths(p) {
+  // Only persist disks; PROJECT_ROOT is always re-detected.
+  localStorage.setItem(PATHS_STORAGE_KEY, JSON.stringify({
+    work: p.work,
+    backup: p.backup,
+  }));
+}
+
+function refreshProjectRootDisplay() {
+  const autoEl = document.getElementById('autoProjectRoot');
+  const warnEl = document.getElementById('projectRootWarn');
+  const detected = detectProjectRoot();
+  if (autoEl) {
+    autoEl.textContent = detected || PROJECT_ROOT_PLACEHOLDER;
+  }
+  if (warnEl) {
+    warnEl.hidden = !!detected;
+  }
+}
+
+function fillPathInputs(p) {
+  document.getElementById('inputWork').value = p.work === WORK_PLACEHOLDER ? '' : p.work;
+  document.getElementById('inputBackup').value = p.backup === BACKUP_PLACEHOLDER ? '' : p.backup;
+  refreshProjectRootDisplay();
+}
+
+function updatePathsSummary() {
+  const root = paths.projectRoot;
+  const sumRoot = document.getElementById('sumProjectRoot');
+  sumRoot.textContent = root + (detectProjectRoot() ? '（自动）' : '');
+  document.getElementById('sumWork').textContent = paths.work;
+  document.getElementById('sumBackup').textContent = paths.backup;
+}
+
+function setPathsUi(mode) {
+  // mode: 'form' | 'summary'
+  const form = document.getElementById('pathsForm');
+  const summary = document.getElementById('pathsSummary');
+  const editBtn = document.getElementById('pathsEditBtn');
+  const cancelBtn = document.getElementById('pathsCancelBtn');
+  const configured = isConfigured(paths);
+
+  if (mode === 'form') {
+    form.classList.add('visible');
+    summary.classList.remove('visible');
+    editBtn.style.display = 'none';
+    cancelBtn.style.display = configured ? 'inline-block' : 'none';
+    refreshProjectRootDisplay();
+  } else {
+    form.classList.remove('visible');
+    summary.classList.add('visible');
+    editBtn.style.display = 'inline-block';
+    updatePathsSummary();
+  }
+}
+
+function beginEditPaths() {
+  fillPathInputs(paths);
+  setPathsUi('form');
+  document.getElementById('pathsPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEditPaths() {
+  if (!isConfigured(paths)) return;
+  fillPathInputs(paths);
+  setPathsUi('summary');
+}
+
+function validatePathInputs() {
+  const projectRoot = currentProjectRoot();
+  const work = document.getElementById('inputWork').value.trim();
+  const backup = document.getElementById('inputBackup').value.trim();
+
+  if (projectRoot === PROJECT_ROOT_PLACEHOLDER) {
+    alert('无法自动识别 PROJECT_ROOT。请用本地文件方式打开 outputs/dashboard.html 后再保存。');
+    refreshProjectRootDisplay();
+    return null;
+  }
+
+  const checks = [
+    { label: 'WORK', value: work, placeholder: WORK_PLACEHOLDER },
+    { label: 'BACKUP', value: backup, placeholder: BACKUP_PLACEHOLDER },
+  ];
+  for (const c of checks) {
+    if (!c.value) {
+      alert(c.label + ' 不能为空，请填写真实路径。');
+      return null;
+    }
+    if (c.value === c.placeholder) {
+      alert(c.label + ' 仍是占位符（' + c.placeholder + '），请换成真实路径。');
+      return null;
+    }
+  }
+  return { projectRoot, work, backup };
+}
+
+function savePaths(event) {
+  if (event) event.preventDefault();
+  const next = validatePathInputs();
+  if (!next) return false;
+  persistPaths(next);
+  applyPaths(next);
+  setPathsUi('summary');
+  return false;
+}
+
+function stillHasPlaceholders(text) {
+  return PLACEHOLDER_FRAGMENTS.some(p => text.includes(p));
+}
+
+function revealPathsForSetup() {
+  fillPathInputs(paths);
+  setPathsUi('form');
+  document.getElementById('pathsPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 async function copyText(elemId) {
   const text = document.getElementById(elemId).textContent;
   await copyToClipboard(text);
 }
 async function copyToClipboard(text) {
+  if (stillHasPlaceholders(text)) {
+    revealPathsForSetup();
+    alert('先在上方保存 WORK / BACKUP（PROJECT_ROOT 会自动识别），再复制命令。');
+    return false;
+  }
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -303,25 +1143,216 @@ async function copyToClipboard(text) {
   }
 }
 
+// Boot: detect PROJECT_ROOT; load WORK/BACKUP from localStorage.
+(function initPaths() {
+  const projectRoot = currentProjectRoot();
+  const stored = loadStoredPaths();
+  const next = {
+    projectRoot,
+    work: (stored && stored.work) || WORK_PLACEHOLDER,
+    backup: (stored && stored.backup) || BACKUP_PLACEHOLDER,
+  };
+  applyPaths(next);
+  fillPathInputs(next);
+  if (isConfigured(next)) {
+    setPathsUi('summary');
+  } else {
+    setPathsUi('form');
+  }
+})();
+
 // ============================================================
 // Run helper
 // ============================================================
+let logPollTimer = null;
+let logPartialLine = '';
+let currentRunId = null;
+
+function stopLogPoll() {
+  if (logPollTimer) {
+    clearInterval(logPollTimer);
+    logPollTimer = null;
+  }
+}
+
+function parseAndAppendLogLine(line) {
+  if (line.startsWith('[stdout] ')) {
+    appendLiveLine('stdout', line.slice(9));
+  } else if (line.startsWith('[stderr] ')) {
+    appendLiveLine('stderr', line.slice(9));
+  } else {
+    appendLiveLine('stdout', line);
+  }
+}
+
+function appendLogChunk(chunk) {
+  if (!chunk) return;
+  const text = logPartialLine + chunk;
+  const lines = text.split('\n');
+  logPartialLine = lines.pop() || '';
+  for (let i = 0; i < lines.length; i++) {
+    parseAndAppendLogLine(lines[i]);
+  }
+}
+
+function flushLogPartial() {
+  if (logPartialLine) {
+    parseAndAppendLogLine(logPartialLine);
+    logPartialLine = '';
+  }
+}
+
+async function finalizeRunById(runId) {
+  try {
+    const r = await fetch(runsMetaUrl(runId), { cache: 'no-store' });
+    if (!r.ok) {
+      finishLiveOutput({ ok: false, error: '无法读取任务状态' });
+      return;
+    }
+    const meta = await r.json();
+    if (meta.status === 'ok') {
+      finishLiveOutput({ ok: true, rc: meta.rc, command: meta.command });
+      pollStatus();
+    } else {
+      finishLiveOutput({
+        ok: false,
+        rc: meta.rc,
+        error: meta.error || '失败',
+        command: meta.command,
+      });
+    }
+  } catch (e) {
+    finishLiveOutput({ ok: false, error: '无法读取任务状态: ' + e.message });
+  }
+}
+
+function startLogPoll(runId, offset) {
+  stopLogPoll();
+  currentRunId = runId;
+  let byteOffset = offset || 0;
+  logPartialLine = '';
+
+  async function tick() {
+    try {
+      const r = await fetch(runsLogUrl(runId, byteOffset), { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.chunk) appendLogChunk(d.chunk);
+      if (typeof d.next_offset === 'number') byteOffset = d.next_offset;
+      if (d.eof) {
+        flushLogPartial();
+        stopLogPoll();
+        await finalizeRunById(runId);
+      }
+    } catch (e) { /* keep polling while web may be flaky */ }
+  }
+
+  tick();
+  logPollTimer = setInterval(tick, 1000);
+}
+
+function openOutputForRun(run, statusHtml) {
+  const panel = document.getElementById('outputPanel');
+  const meta = document.getElementById('outputMeta');
+  const cmdEl = document.getElementById('outputCmd');
+  const statusEl = document.getElementById('outputStatus');
+  const stdoutEl = document.getElementById('outputStdout');
+  const stderrEl = document.getElementById('outputStderr');
+
+  const wasHidden = getComputedStyle(panel).display === 'none';
+  meta.textContent = (run.started_at || new Date().toLocaleTimeString()) +
+    (run.id ? ' · ' + run.id : '');
+  cmdEl.textContent = '$ ' + (run.command || run.command_name || '');
+  cmdEl.style.display = 'block';
+  statusEl.innerHTML = statusHtml;
+  stdoutEl.textContent = '';
+  stdoutEl.style.display = 'none';
+  stderrEl.textContent = '';
+  stderrEl.style.display = 'none';
+  panel.style.display = 'block';
+  if (wasHidden) panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function resumeOrShowLatestRun() {
+  try {
+    const r = await fetch(RUNS_LATEST_URL, { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const run = data.run;
+    if (!run) return;
+
+    if (run.status === 'running') {
+      openOutputForRun(run, '<span class="ok">运行中（回看）</span>');
+      startLogPoll(run.id, 0);
+      return;
+    }
+
+    openOutputForRun(run, '<span class="ok">加载中...</span>');
+    stopLogPoll();
+    currentRunId = run.id;
+    logPartialLine = '';
+    let offset = 0;
+    // Load finished log in one or more chunks
+    for (let i = 0; i < 10000; i++) {
+      const lr = await fetch(runsLogUrl(run.id, offset), { cache: 'no-store' });
+      if (!lr.ok) break;
+      const ld = await lr.json();
+      if (ld.chunk) appendLogChunk(ld.chunk);
+      offset = ld.next_offset;
+      if (ld.eof) break;
+      if (!ld.chunk) break;
+    }
+    flushLogPartial();
+    if (run.status === 'ok') {
+      finishLiveOutput({ ok: true, rc: run.rc, command: run.command });
+    } else {
+      finishLiveOutput({
+        ok: false,
+        rc: run.rc,
+        error: run.error || '失败',
+        command: run.command,
+      });
+    }
+  } catch (e) {
+    /* web UI not running */
+  }
+}
+
 async function runCommand(btn, cmdName) {
   if (btn.disabled) return;
   btn.disabled = true;
   const orig = btn.textContent;
-  btn.textContent = '⏳ 运行中...';
+  btn.textContent = '运行中...';
+  stopLogPoll();
+  beginLiveOutput(cmdName);
   try {
     const r = await fetch(RUN_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({command: cmdName}),
     });
-    const data = await r.json();
-    showOutput(data);
-    if (data.ok) pollStatus();
+    const ctype = (r.headers.get('Content-Type') || '').toLowerCase();
+    if (ctype.includes('ndjson')) {
+      await consumeNdjson(r);
+    } else {
+      const data = await r.json();
+      if (!data.ok && data.error === '已有任务在运行') {
+        const active = data.active;
+        const tip = document.getElementById('outputStatus');
+        tip.innerHTML = '<span class="err">已有任务在运行</span> — 正在回看该任务';
+        if (active && active.id) {
+          openOutputForRun(active, '<span class="ok">运行中（回看）</span>');
+          startLogPoll(active.id, 0);
+        } else {
+          await resumeOrShowLatestRun();
+        }
+      } else {
+        showOutput(data);
+        if (data.ok) pollStatus();
+      }
+    }
   } catch (e) {
-    showOutput({ok: false, command: cmdName, error: '网络错误: ' + e.message});
+    finishLiveOutput({ok: false, error: '网络错误: ' + e.message});
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -333,6 +1364,239 @@ async function runApply(btn, cmdName, confirmMsg) {
   return runCommand(btn, cmdName);
 }
 
+async function runInit(btn) {
+  if (lastInitialized === true) {
+    if (!confirm('工作盘已初始化。再跑一次是安全的（幂等，不碰 inbox）。继续？')) return;
+  }
+  return runCommand(btn, 'init');
+}
+
+async function copyRestartCmd() {
+  const text = (CMDS && CMDS.webRestart) || '';
+  if (!text || stillHasPlaceholders(text)) {
+    revealPathsForSetup();
+    alert('先在上方保存 WORK / BACKUP，并确认 PROJECT_ROOT 已自动识别，再复制重启命令。');
+    return;
+  }
+  const ok = await copyToClipboard(text);
+  if (ok) {
+    alert('已复制重启命令。请粘贴到终端执行，然后刷新本页。\n\n' + text);
+  }
+}
+
+let lastInitialized = null; // true | false | null (unknown / web down)
+
+function updateInitStatus(initialized) {
+  lastInitialized = initialized;
+  const el = document.getElementById('initStatusLine');
+  if (!el) return;
+  el.classList.remove('ok', 'need');
+  if (initialized === true) {
+    el.textContent = '状态：已初始化。可跳过本步；再跑也安全（幂等）。';
+    el.classList.add('ok');
+  } else if (initialized === false) {
+    el.textContent = '状态：未初始化。请先运行 init。';
+    el.classList.add('need');
+  } else if (initialized === 'stale') {
+    el.textContent = '状态：当前 Web UI 过旧，无法检测。请用右上角「复制重启命令」更新后再看。';
+    el.classList.add('need');
+  } else {
+    el.textContent = '状态：无法检测（Web UI 未运行）。请先启动或重启 Web UI。';
+  }
+}
+
+const PIPELINE_STEPS = [
+  { key: 'dedupe_apply', num: '02', statusId: 'dedupeStepStatus', stepId: 'stepDedupe' },
+  { key: 'rename_apply', num: '03', statusId: 'renameStepStatus', stepId: 'stepRename' },
+  { key: 'sync_apply', num: '05', statusId: 'syncStepStatus', stepId: 'stepSync' },
+];
+
+function formatApplyClock(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function updateWebStepMarker() {
+  const webLive = document.body.classList.contains('web-live');
+  const stepEl = document.getElementById('stepWeb');
+  const statusEl = document.getElementById('webStepStatus');
+  if (stepEl) {
+    if (webLive) stepEl.classList.add('done');
+    else stepEl.classList.remove('done');
+  }
+  if (statusEl) {
+    statusEl.classList.remove('ok', 'need');
+    if (webLive) {
+      statusEl.textContent = '已启动';
+      statusEl.classList.add('ok');
+    } else {
+      statusEl.textContent = '未启动';
+    }
+  }
+  return webLive ? '04 已启动' : '04 未执行';
+}
+
+function updatePipelineMarkers(pipeline) {
+  const progressEl = document.getElementById('pipelineProgress');
+  const webOverview = updateWebStepMarker();
+  if (!pipeline || typeof pipeline !== 'object') {
+    if (progressEl) progressEl.textContent = '进度：' + webOverview + ' · 02/03/05 无法检测';
+    for (const s of PIPELINE_STEPS) {
+      const statusEl = document.getElementById(s.statusId);
+      const stepEl = document.getElementById(s.stepId);
+      if (statusEl) {
+        statusEl.textContent = '—';
+        statusEl.classList.remove('ok', 'need');
+      }
+      if (stepEl) stepEl.classList.remove('done', 'running');
+    }
+    return;
+  }
+
+  const overview = [];
+  for (const s of PIPELINE_STEPS) {
+    if (s.num === '05') overview.push(webOverview);
+    const m = pipeline[s.key] || {};
+    const statusEl = document.getElementById(s.statusId);
+    const stepEl = document.getElementById(s.stepId);
+    if (statusEl) statusEl.classList.remove('ok', 'need');
+    if (stepEl) stepEl.classList.remove('done', 'running');
+
+    let label;
+    if (m.running) {
+      label = '执行中';
+      if (statusEl) {
+        statusEl.textContent = '执行中…';
+        statusEl.classList.add('need');
+      }
+      if (stepEl) stepEl.classList.add('running');
+    } else if (m.done) {
+      label = '已完成';
+      const clock = formatApplyClock(m.finished_at);
+      if (statusEl) {
+        statusEl.textContent = clock
+          ? ('已完成 · Apply 于 ' + clock)
+          : '已完成';
+        statusEl.classList.add('ok');
+      }
+      if (stepEl) stepEl.classList.add('done');
+    } else {
+      label = '未执行';
+      if (statusEl) statusEl.textContent = '尚未 Apply';
+    }
+    overview.push(s.num + ' ' + label);
+  }
+  if (progressEl) progressEl.textContent = '进度：' + overview.join(' · ');
+}
+
+function beginLiveOutput(cmdName) {
+  const panel = document.getElementById('outputPanel');
+  const meta = document.getElementById('outputMeta');
+  const cmdEl = document.getElementById('outputCmd');
+  const statusEl = document.getElementById('outputStatus');
+  const stdoutEl = document.getElementById('outputStdout');
+  const stderrEl = document.getElementById('outputStderr');
+
+  const wasHidden = getComputedStyle(panel).display === 'none';
+  meta.textContent = new Date().toLocaleTimeString();
+  cmdEl.textContent = '$ ' + cmdName;
+  cmdEl.style.display = 'block';
+  statusEl.innerHTML = '<span class="ok">运行中...</span>';
+  stdoutEl.textContent = '';
+  stdoutEl.style.display = 'none';
+  stderrEl.textContent = '';
+  stderrEl.style.display = 'none';
+  panel.style.display = 'block';
+  if (wasHidden) panel.scrollIntoView({behavior: 'smooth'});
+}
+
+function appendLiveLine(stream, line) {
+  const el = document.getElementById(stream === 'stderr' ? 'outputStderr' : 'outputStdout');
+  if (!el) return;
+  if (el.style.display === 'none') el.style.display = 'block';
+  el.textContent += (el.textContent ? '\n' : '') + line;
+  el.scrollTop = el.scrollHeight;
+}
+
+function finishLiveOutput(data) {
+  const meta = document.getElementById('outputMeta');
+  const statusEl = document.getElementById('outputStatus');
+  const cmdEl = document.getElementById('outputCmd');
+  const ts = new Date().toLocaleTimeString();
+  meta.textContent = ts + (data.rc !== undefined && data.rc !== null ? ' · rc=' + data.rc : '');
+  if (data.command) {
+    cmdEl.textContent = '$ ' + data.command;
+    cmdEl.style.display = 'block';
+  }
+  if (data.ok) {
+    statusEl.innerHTML = '<span class="ok">成功</span>';
+  } else {
+    statusEl.innerHTML = '<span class="err">' + escapeHtml(data.error || '失败') + '</span>';
+  }
+}
+
+async function consumeNdjson(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let lastCommand = '';
+  let runId = null;
+  let sawEnd = false;
+
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, {stream: true});
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const raw = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (!raw.trim()) continue;
+      let ev;
+      try { ev = JSON.parse(raw); } catch (_) { continue; }
+      if (ev.type === 'start') {
+        lastCommand = ev.command || '';
+        runId = ev.run_id || null;
+        currentRunId = runId;
+        const cmdEl = document.getElementById('outputCmd');
+        cmdEl.textContent = '$ ' + lastCommand;
+        cmdEl.style.display = 'block';
+      } else if (ev.type === 'stdout' || ev.type === 'stderr') {
+        appendLiveLine(ev.type, ev.line == null ? '' : String(ev.line));
+      } else if (ev.type === 'end') {
+        sawEnd = true;
+        finishLiveOutput({ok: !!ev.ok, rc: ev.rc, command: lastCommand});
+        if (ev.ok) pollStatus();
+      } else if (ev.type === 'error') {
+        sawEnd = true;
+        finishLiveOutput({
+          ok: false,
+          error: ev.error || 'error',
+          command: ev.command || lastCommand,
+        });
+      }
+    }
+  }
+  if (!sawEnd) {
+    // Stream dropped — keep watching via persisted log instead of failing.
+    const statusEl = document.getElementById('outputStatus');
+    statusEl.innerHTML = '<span class="ok">运行中（回看）</span>';
+    const stdoutEl = document.getElementById('outputStdout');
+    const stderrEl = document.getElementById('outputStderr');
+    stdoutEl.textContent = '';
+    stdoutEl.style.display = 'none';
+    stderrEl.textContent = '';
+    stderrEl.style.display = 'none';
+    if (runId) {
+      startLogPoll(runId, 0);
+    } else {
+      await resumeOrShowLatestRun();
+    }
+  }
+}
+
 function showOutput(data) {
   const panel = document.getElementById('outputPanel');
   const meta = document.getElementById('outputMeta');
@@ -341,15 +1605,16 @@ function showOutput(data) {
   const stdoutEl = document.getElementById('outputStdout');
   const stderrEl = document.getElementById('outputStderr');
 
+  const wasHidden = getComputedStyle(panel).display === 'none';
   const ts = new Date().toLocaleTimeString();
   meta.textContent = ts + (data.rc !== undefined ? ' · rc=' + data.rc : '');
   cmdEl.textContent = '$ ' + (data.command || '');
   cmdEl.style.display = data.command ? 'block' : 'none';
 
   if (data.ok) {
-    statusEl.innerHTML = '<span class="ok">✓ 成功</span>';
+    statusEl.innerHTML = '<span class="ok">成功</span>';
   } else {
-    statusEl.innerHTML = '<span class="err">✗ ' + escapeHtml(data.error || 'failed') + '</span>';
+    statusEl.innerHTML = '<span class="err">' + escapeHtml(data.error || '失败') + '</span>';
   }
 
   stdoutEl.textContent = data.stdout || '';
@@ -358,7 +1623,7 @@ function showOutput(data) {
   stderrEl.style.display = data.stderr ? 'block' : 'none';
 
   panel.style.display = 'block';
-  panel.scrollIntoView({behavior: 'smooth'});
+  if (wasHidden) panel.scrollIntoView({behavior: 'smooth'});
 }
 
 function escapeHtml(s) {
@@ -369,6 +1634,7 @@ function escapeHtml(s) {
 // Status poller
 // ============================================================
 async function pollStatus() {
+  const notInitCard = document.getElementById('notInitializedCard');
   try {
     const r = await fetch(API_URL, { cache: 'no-store' });
     if (r.ok) {
@@ -376,22 +1642,45 @@ async function pollStatus() {
       document.getElementById('inbox').textContent = d.inbox;
       document.getElementById('byDate').textContent = d.by_date;
       document.getElementById('screenshots').textContent = d.screenshots;
+      const sr = document.getElementById('screenrecords');
+      if (sr) sr.textContent = d.screenrecords != null ? d.screenrecords : '–';
+      const docsEl = document.getElementById('docs');
+      if (docsEl) docsEl.textContent = d.docs != null ? d.docs : '–';
       document.getElementById('vlogs').textContent = d.vlogs;
       document.getElementById('trash').textContent = d.trash;
       document.getElementById('starred').textContent = d.starred;
       document.getElementById('lastSync').textContent = d.last_sync || '–';
       document.getElementById('webDot').className = 'dot running';
       document.getElementById('webStatus').textContent = 'Web UI: 运行中';
-      document.getElementById('openWebBtn').style.display = 'inline-block';
-      document.getElementById('webNotRunningCard').style.display = 'none';
+      const openStep = document.getElementById('openWebBtnStep');
+      if (openStep) openStep.style.display = 'inline-block';
+      document.getElementById('webNotRunningCard').classList.remove('visible');
+      document.body.classList.add('web-live');
+      if (d.initialized === false) {
+        notInitCard.classList.add('visible');
+        updateInitStatus(false);
+      } else if (d.initialized === true) {
+        notInitCard.classList.remove('visible');
+        updateInitStatus(true);
+      } else {
+        // Old server without initialized field
+        notInitCard.classList.remove('visible');
+        updateInitStatus('stale');
+      }
+      updatePipelineMarkers(d.pipeline);
     } else {
       throw new Error('bad status ' + r.status);
     }
   } catch (e) {
     document.getElementById('webDot').className = 'dot stopped';
     document.getElementById('webStatus').textContent = 'Web UI: 未运行';
-    document.getElementById('openWebBtn').style.display = 'none';
-    document.getElementById('webNotRunningCard').style.display = 'block';
+    const openStep = document.getElementById('openWebBtnStep');
+    if (openStep) openStep.style.display = 'none';
+    document.getElementById('webNotRunningCard').classList.add('visible');
+    notInitCard.classList.remove('visible');
+    document.body.classList.remove('web-live');
+    updateInitStatus(null);
+    updatePipelineMarkers(null);
   }
 }
 
@@ -400,9 +1689,10 @@ function openWeb() {
   window.open('http://localhost:8765/', '_blank');
 }
 
-// Initial poll + every 5s
+// Initial poll + every 5s; resume latest/active run for replay
 pollStatus();
 setInterval(pollStatus, 5000);
+resumeOrShowLatestRun();
 </script>
 
 </body>

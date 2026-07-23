@@ -52,7 +52,8 @@ $EDITOR config.yaml   # 检查路径是否一致
 
 ```bash
 ./scripts/init_storage.sh
-# 默认在 /Volumes/Storage/ 创建顶层目录骨架
+# 默认在 /Volumes/Storage/ 创建顶层目录骨架：
+#   inbox/ by-date/ screenshots/ screenrecords/ docs/ _favorite/ _vlogs/ _trash/ _meta/
 # 可重跑，幂等
 ```
 
@@ -187,29 +188,34 @@ inbox/
 ```bash
 ./scripts/rename_organize.py
 # 读 _meta/events.yaml 的主题配置
-# 截图/录屏检测（v4）：
-#   规则 1: 文件名匹配任一关键字（大小写不敏感子串）
-#          screenshot / screenrecording / screen recording / screenrecord
-#          / screenrecorder / screencapture / screen capture / rpreplay
-#   规则 2: 无 EXIF GPS + 无相机标识（图片视频通用）
+# 截图/录屏检测（v7）：
+#   0. 已知相机文件名（IMG_/VID_/DJI_/…）→ by-date/（normal）
+#   图片：含 screenshot → screenshots/；无 GPS → screenshots/
+#   视频：含 record → screenrecords/；（无 Make 或 无 GPS）→ screenrecords/
 # 其他照片 → by-date/<YYYY-MM>/photos/；视频 → videos/
 # 主题文件进 2026-MM_<theme>/，无主题文件进 2026-MM/
 ```
 
-**截图/录屏去哪**：满足以下任一条件即归到根目录 `/Volumes/Storage/screenshots/`（不分月份/主题）：
-- 文件名匹配任一关键字（覆盖 macOS 录屏 `Screen Recording`、iOS 录屏 `RPReplay_Final_*`、Android 录屏 `Screenrecorder_*` / `Screenrecord_*` 等）
-- 无 EXIF GPS + 无镜头厂商信息
+**截图 / 录屏分两桶**（均不分月份/主题）：
 
-保留 `screenshot_` 前缀命名：`screenshot_20260715_183022_iphone_a3f2.png`（图片和录屏都用此前缀）。
+| 类型 | 目录 | 命名前缀 |
+|---|---|---|
+| 截图（图） | `/Volumes/Storage/screenshots/` | `screenshot_<date>_<source?>_<hash>.ext` |
+| 录屏（视频） | `/Volumes/Storage/screenrecords/` | `screenrecorder_<date>_<source?>_<hash>.ext` |
+| 文档（手动） | `/Volumes/Storage/docs/` | `doc_<date>_<source?>_<hash>.ext`（Web 勾选「移至文档」，不自动分类）|
 
 > **示例**：
-> - iOS 录屏 `RPReplay_Final_1689496200.mov` → 命中关键字 `rpreplay` → `screenshots/`
-> - Android 录屏 `Screenrecorder_20260715_140012.mp4` → 命中关键字 `screenrecorder` → `screenshots/`
-> - iPhone 默认截图 `IMG_XXXX.PNG`（无 EXIF）→ 规则 2 → `screenshots/`
-> - iPhone 默认照片 `IMG_0001.HEIC`（有 Apple Make）→ 不满足任何规则 → `by-date/photos/`
-> - 佳能单反 `IMG_4521.CR2`（有 Canon Make，无 GPS）→ 不满足规则 2 → `by-date/photos/`
+> - `Screenshot_….png` → 关键字 → `screenshots/`
+> - 无 GPS 的微信/小红书 JPG（非相机名）→ `screenshots/`
+> - Android `Screenrecorder_….mp4` → 含 `record` → `screenrecords/`
+> - iOS `RPReplay_Final_….mov`（无 Make/GPS）→ `screenrecords/`
+> - `VID_….mp4` / `IMG_….HEIC`（相机文件名白名单）→ `by-date/`
+> - 手机拍的证件/票据 → 整理进 by-date 后，在 Web 勾选「移至文档」
 
-幂等：可重复跑，已分桶的文件会被搬到主题桶。
+幂等：可重复跑，已分桶的文件会被搬到主题桶。存量误分可用 Web 纠错（按当前页只显示可去的目标）：
+- 普通分类页：移至截图录屏 / 移至文档
+- 截图、录屏页：移回普通分类 / 移至文档
+- 文档页：移至截图录屏 / 移回普通分类
 
 ### 5. 添加主题（按需）
 
@@ -226,12 +232,15 @@ inbox/
 ```bash
 ./scripts/web_browse.py --host 0.0.0.0 --port 8765 &
 # 浏览器开 http://mac-mini.local:8765/
+# 或用 dashboard「04 Web 浏览」打开
 
-# 在月份/主题页面点 ★ 加星
-# 星标写入 _meta/stars/<bucket>.json
+# 在月份/主题/截图/录屏页面：
+#   · 点 ★ 加星 → _meta/stars/<bucket>.json
+#   · 勾选文件 → 按当前页显示可用目标（移至截图录屏 / 移回普通分类 / 移至文档）
+#   · 「移至回收站」→ _trash/<批次>/…（软删除，可找回；不进备份盘）
 ```
 
-`web_browse.py` 后台跑着就行，随时打开浏览器看。
+导航含 **加星**（`/starred` 汇总全部 ★）、**截图**、**录屏**、**文档**。`web_browse.py` 后台跑着就行。
 
 ### 7. 导出精选到 iPhone
 

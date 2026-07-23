@@ -10,9 +10,9 @@
 - 🧹 **SHA-256 deduplication** — exact-byte duplicate detection
 - 🏷️ **Smart rename** — `YYYYMMDD_HHMMSS_<source>_<hash>.<ext>` with EXIF/QuickTime date extraction
 - 📅 **Time-based archive** — `by-date/YYYY/YYYY-MM[/YYYY-MM_<theme>]/`
-- 📸 **Screenshot/recording detection** — v4 keyword matching + v5 camera filename whitelist
+- 📸 **Screenshot/recording detection (v7)** — 截图→`screenshots/`、录屏→`screenrecords/`；相机文件名白名单优先
 - 🔄 **Mirror to backup disk** — append-only rsync to 4T MediaVault
-- 🌐 **Web browser UI** — browse with thumbnails, star favorites
+- 🌐 **Web browser UI** — browse with thumbnails, star favorites, bidirectional reclassify
 - 📱 **iPhone sync** — AppleScript to import + favorite into macOS Photos
 - 🛡️ **Path sandbox** — scripts only touch whitelisted paths
 
@@ -41,8 +41,10 @@ open outputs/dashboard.html
 │  /Volumes/Storage/  (Work disk, 500G SSD)        │
 │  ├── inbox/          ← drop new files here       │
 │  ├── by-date/        ← organized by date         │
-│  │   └── 2026/07-July/photos/...                  │
-│  ├── screenshots/    ← detected screenshots     │
+│  │   └── 2026/2026-07/photos/...                  │
+│  ├── screenshots/    ← screenshots (images)      │
+│  ├── screenrecords/  ← screen recordings (video) │
+│  ├── docs/           ← document photos (manual)  │
 │  ├── _favorite/      ← starred items             │
 │  ├── _vlogs/         ← edited videos             │
 │  ├── _trash/         ← dedup'd (30-day retain)   │
@@ -55,7 +57,8 @@ open outputs/dashboard.html
                     ↓ rsync (append-only)
 ┌─────────────────────────────────────────────────┐
 │  /Volumes/WD4T/MediaVault/  (Backup disk, 4T)    │
-│  Mirror of by-date/ + screenshots/ + favorites/   │
+│  Mirror: by-date/ + screenshots/ + screenrecords/│
+│          + docs/ + _favorite/ + _vlogs/          │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -83,14 +86,16 @@ Run `picvault help` for complete reference.
 
 Open `outputs/dashboard.html` in your browser, or run `picvault web start && picvault open`.
 
-⚠️ **First-time setup**: edit the three `PROJECT_ROOT` / `WORK` / `BACKUP` constants
-near the top of `outputs/dashboard.html` to match your local disk layout. The repo
-ships with placeholders (`/path/to/picvault`, `/Volumes/<work-disk>`, `/Volumes/<backup-disk>`)
-so nothing personal is hardcoded.
+⚠️ **First-time setup**: open `outputs/dashboard.html` as a local file (so the page can
+auto-detect `PROJECT_ROOT` as the repo root above `outputs/`). Then fill in `WORK` /
+`BACKUP` (work disk / backup disk roots). Those two are saved in the browser via
+`localStorage` (`picvault.dashboard.paths`) and reused on refresh; only “编辑路径” +
+save changes them. Copy buttons refuse to copy until real disk paths are saved.
 
 The dashboard shows:
-- Live file counts (polls `/api/status` every 5s when Web UI is running)
-- One-click copy buttons for every command
+- Live file counts (polls `/api/status` every 5s when Web UI is running; `initialized` reflects whether the work disk skeleton exists)
+- One-click copy / run for `init` and the rest of the pipeline (Run 输出支持流式进度)
+- Run 日志落在 `_meta/logs/runs/`，dashboard 可回看/断线续看；长任务不限时
 - Buttons to start/stop Web UI
 
 ## Installation

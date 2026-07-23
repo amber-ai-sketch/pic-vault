@@ -4,7 +4,7 @@
 
 三盘架构 + 严格路径沙箱：工作盘 `/Volumes/Storage`（500G 机械）日常处理；备份盘 `/Volumes/WD4T/MediaVault/`（4T 机械）只接收 rsync 镜像；首次启动用 SSD `/Volumes/YM` 做迁移工作区。**脚本严格只读写这三个路径**。
 
-流水线：手动导入到 inbox → dedupe（SHA-256，源从 EXIF/`.source`/`--source` 三层识别）→ rename_organize（月份桶 + 主题桶）→ rsync 到 WD4T。精选走 `_favorite/` 真实复制 + AppleScript（`skip checking duplicates yes` + 打 favorite）。AppleScript 中带主题 → 相册名=主题名；无主题 → 相册名固定 `"Picks"`。iCloud Photos 已开启，AppleScript 跑完后自动同步到 iPhone。Vlog 推荐 iMovie。**首次迁移用户自行在 `/Volumes/YM/MediaVault/_pre_migration_backup/` 放好原始数据**，脚本只负责 stage → 处理 → rsync 回 WD4T。SD 卡格式化和工作盘清空人工完成。
+流水线：手动导入到 inbox → dedupe（SHA-256）→ rename_organize（by-date + screenshots + screenrecords，v7 分类）→ rsync 到 WD4T。精选走 `_favorite/` 真实复制 + AppleScript（`skip checking duplicates yes` + 打 favorite）。AppleScript 中带主题 → 相册名=主题名；无主题 → 相册名固定 `"Picks"`。iCloud Photos 已开启，AppleScript 跑完后自动同步到 iPhone。Vlog 推荐 iMovie。**首次迁移用户自行在 `/Volumes/YM/MediaVault/_pre_migration_backup/` 放好原始数据**，脚本只负责 stage → 处理 → rsync 回 WD4T。SD 卡格式化和工作盘清空人工完成。
 
 ## 路径沙箱
 
@@ -38,11 +38,15 @@ flowchart TB
   subgraph WORK["② 工作盘 /Volumes/Storage 500G"]
     WI["inbox / 手动拖入"]
     WB[("by-date / 年-月<br/>默认桶 + 主题桶")]
+    WS["screenshots/"]
+    WR["screenrecords/"]
     WF["_favorite / 真实副本"]
     WV["_vlogs"]
     WT["_trash / 30天"]
     WM["_meta"]
     WI -->|"dedupe +<br/>rename_organize"| WB
+    WI -->|"v7 截图"| WS
+    WI -->|"v7 录屏"| WR
     WB -->|"pick_to_iphone"| WF
     WB -->|"vlog 导出"| WV
     WI -. "副本" .-> WT
@@ -50,6 +54,8 @@ flowchart TB
 
   subgraph BACK["③ 备份盘 /Volumes/WD4T/MediaVault 4T<br/>rsync append-only 只增不删"]
     BB[("by-date")]
+    BS["screenshots"]
+    BR["screenrecords"]
     BF["_favorite"]
     BV["_vlogs"]
   end
@@ -69,7 +75,7 @@ flowchart TB
     M4["M4 Vlog iMovie 导出"]
     M5["M5 原始数据 → YM 备份"]
     M6["M6 Photos Duplicates 合并"]
-    M7["M7 Web 加星 / 选精选"]
+    M7["M7 Web 加星 / 纠错重分类"]
   end
 
   %% ===============================================
@@ -81,6 +87,8 @@ flowchart TB
   D4 -. M1 .-> WI
   D5 -. M1 .-> WI
   WB -. "rsync 镜像" .-> BB
+  WS -. "rsync 镜像" .-> BS
+  WR -. "rsync 镜像" .-> BR
   WF -. "rsync 镜像" .-> BF
   WV -. "rsync 镜像" .-> BV
 
@@ -136,7 +144,7 @@ flowchart TB
 | M4 | Vlog iMovie 导出 | 剪辑完成后 |
 | M5 | 原始数据 → YM 备份 | 首次启动前一次性 |
 | M6 | Photos Duplicates 合并 | 每次 AppleScript 跑完后 |
-| M7 | Web 加星 / 选精选 | 整理时浏览 + 打星 |
+| M7 | Web 加星 / 选精选 / 截图录屏纠错 | 整理时浏览 + 打星 |
 
 ### 箭头类型说明
 
@@ -205,9 +213,14 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 │       └── 2026-07_海南/           # 旁挂桶
 │           ├── photos/
 │           └── videos/
-├── screenshots/                    # 截图根目录（不分月份/主题）
+├── screenshots/                    # 截图（图）根目录
 │   ├── screenshot_20260715_183022_iphone_a3f2.png
-│   ├── screenshot_20260720_140530_dji_7c1e.png
+│   └── ...
+├── screenrecords/                  # 录屏（视频）根目录
+│   ├── screenrecorder_20260715_143000_a1b2.mov
+│   └── ...
+├── docs/                           # 文档照片（手动移入，不自动分类）
+│   ├── doc_20260715_183022_iphone_a3f2.jpg
 │   └── ...
 ├── _favorite/
 │   ├── 2026-07_海南/               # 带主题：来自主题桶 → 同名子目录
@@ -233,7 +246,9 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 ├── (其他)                          # 脚本不动
 └── MediaVault/
     ├── by-date/                    # 镜像自 Storage 或 SSD
-    ├── screenshots/                # 镜像自 Storage（根目录）
+    ├── screenshots/                # 镜像：截图
+    ├── screenrecords/              # 镜像：录屏
+    ├── docs/                       # 镜像：文档
     ├── _favorite/
     └── _vlogs/
 ```
@@ -247,6 +262,8 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
     ├── inbox/
     ├── by-date/
     ├── screenshots/
+    ├── screenrecords/
+    ├── docs/
     ├── _favorite/
     ├── _vlogs/
     ├── _trash/
@@ -263,240 +280,110 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 
 源白名单：`iphone` `samsung` `xiaomi` `huawei` `oppo` `vivo` `oneplus` `google` `canon` `canon-a/b` `nikon` `nikon-a` `sony` `sony-a` `fuji` `fuji-a` `ricoh-gr` `ricoh-gr2` `dji` `dji-nano/action/pocket/osmo` `gopro`
 
-Live Photo（HEIC + MOV）成对处理。截图/录屏检测（关键字匹配 + 无 GPS 启发式）见下文"截图检测（v4）"。
+Live Photo（HEIC + MOV）成对处理。截图/录屏分类见下文「截图/录屏检测（v7）」。
 
-## 截图检测（v4 加录屏关键字）
+## 截图/录屏检测（v7）
 
-**三层判定（任一满足即识别为截图/录屏）**：
-1. 文件名（不区分大小写）匹配任一关键字（见下方关键词列表）
-2. 无 EXIF GPS + 无镜头厂商信息（图片和视频通用）
-3. （v1 不做）图像内容检测
+截图与录屏分两桶；相机文件名白名单优先保真。
 
-**归档位置**：`/Volumes/Storage/screenshots/`（根目录，不分月份/主题）。
-**命名格式**：保留 `screenshot` 前缀 → `screenshot_<YYYYMMDD_HHMMSS>_<source?>_<hash>.<ext>`。
+### 判定顺序
 
-### 关键词列表
+0. **`is_camera_filename`**（`IMG_` / `VID_` / `DJI_` / `GOPR` / …）→ **normal** → `by-date/`
 
-```
-keywords = [
-    "screenshot",          # iPhone/Android 截图（最常见）
-    "screenrecording",     # macOS/iOS 录屏（QuickTime / 控制中心）
-    "screen recording",    # 带空格（macOS 默认命名）
-    "screenrecord",        # Android 内置录屏（部分 ROM）
-    "screenrecorder",      # 第三方 Android 录屏 app（AZ / Mobizen / XRecorder）
-    "screencapture",       # 部分 Linux/Windows 工具
-    "screen capture",      # 带空格
-    "rpreplay",            # iOS 控制中心录屏默认前缀（RPReplay_Final_*.mov）
-]
-```
+**图片**（非视频）：
+1. 文件名含 `screenshot` → `screenshots/`
+2. **无 EXIF GPS** → `screenshots/`
+3. 否则 → `by-date/`
 
-> **大小写不敏感**：所有关键字匹配前都转小写。
-> **子串匹配**：`'screenrecorder' in name_lower()`，所以 `Screenrecorder_2026-07-15.mp4` 命中。
+**视频**：
+1. 文件名含 `record`（子串，覆盖 Screen Recording / Screenrecorder 等）→ `screenrecords/`
+2. **无 Make 或 无 GPS/location** → `screenrecords/`
+3. 否则 → `by-date/`
 
-### 检测逻辑
+> iOS `RPReplay_Final_*.mov` 不含 `record`，靠规则 2（无元数据）进 `screenrecords/`。
 
-```python
-def is_screenshot(path, exif_data, config):
-    name_lower = path.name.lower()
-    
-    # 1. 文件名匹配任一关键字（最高优先级）
-    keywords = config['screenshot_detection'].get('keywords', ['screenshot'])
-    for kw in keywords:
-        if kw.lower() in name_lower:
-            return True
-    
-    # 2. 无 GPS + 无相机标识（图片视频通用）
-    if config['screenshot_detection'].get('no_gps_as_screenshot', True):
-        has_gps = check_gps(exif_data)
-        has_camera_make = check_camera_make(exif_data)
-        if not has_gps and not has_camera_make:
-            return True
-    
-    return False
+### 命名与落盘
 
+| 类型 | 目录 | 命名 |
+|---|---|---|
+| screenshot | `screenshots/` | `screenshot_<date>_<source?>_<hash>.ext` |
+| recording | `screenrecords/` | `screenrecorder_<date>_<source?>_<hash>.ext` |
+| docs（仅手动） | `docs/` | `doc_<date>_<source?>_<hash>.ext` |
+| normal | `by-date/...` | `<date>_<source?>_<hash>.ext` |
 
-def check_gps(exif_data):
-    if not exif_data:
-        return False
-    gps_info = exif_data.get(0x8825)
-    if not gps_info:
-        return False
-    return bool(gps_info.get(2) or gps_info.get(4))
+### 命名示例（v7）
 
-
-def check_camera_make(exif_data):
-    if not exif_data:
-        return False
-    make = exif_data.get(0x010F, b'').decode('utf-8', 'ignore').strip()
-    return bool(make)
-```
-
-### 命名示例（v4 涵盖更多录屏格式）
-
-| 原始文件名 | 来源工具 | 重命名后 | 走哪 |
-|---|---|---|---|
-| `Screenshot_2026-07-15_18-30-22.png` | Android 系统截图 | `screenshot_20260715_183022_iphone_a3f2.png` | screenshots/ |
-| `IMG_0001.PNG`（无 EXIF）| iPhone 截图 | `screenshot_<日期>_<源>_<hash>.png` | screenshots/（规则 2）|
-| `Screen Recording 2026-07-15 14.30.00.mov` | macOS QuickTime | `screenshot_20260715_143000_<源>_<hash>.mov` | screenshots/ |
-| `RPReplay_Final_1689496200.mov` | iOS 控制中心录屏 | `screenshot_<日期>_<源>_<hash>.mov` | screenshots/ |
-| `Screenrecord_2026-07-15_14-30-12.mp4` | Android 内置 | `screenshot_<日期>_<源>_<hash>.mp4` | screenshots/ |
-| `Screenrecorder_20260715_140012.mp4` | 第三方 Android app | `screenshot_<日期>_<源>_<hash>.mp4` | screenshots/ |
-| `Screenshot_2026-07-15-14-30-12.mp4` | 第三方 Android app（变体）| `screenshot_<日期>_<源>_<hash>.mp4` | screenshots/ |
-| 微信下载的 `wechat_video.mp4`（无 EXIF）| 微信保存的视频 | `screenshot_<日期>_<源>_<hash>.mp4` | screenshots/（规则 2）|
-| `IMG_0001.HEIC` iPhone 拍照 | 有 Apple Make | （不变）| `by-date/<YYYY-MM>/photos/` |
-| `IMG_4521.CR2` 佳能拍 | 有 Canon Make，无 GPS | （不变）| `by-date/<YYYY-MM>/photos/` |
+| 原始文件名 | 来源 | 走哪 |
+|---|---|---|
+| `Screenshot_2026-07-15_18-30-22.png` | Android 截图 | `screenshots/` |
+| 无 GPS 的微信/小红书 JPG（非相机名） | 社交另存 | `screenshots/` |
+| `Screen Recording 2026-07-15.mov` | macOS | `screenrecords/`（含 record）|
+| `Screenrecorder_20260715.mp4` | Android | `screenrecords/` |
+| `RPReplay_Final_1689496200.mov` | iOS 录屏 | `screenrecords/`（无 Make/GPS）|
+| `wechat_video.mp4`（无元数据） | 微信 | `screenrecords/` |
+| `VID_20240715_140012.mp4` | 相机名白名单 | `by-date/videos/` |
+| `IMG_0001.HEIC`（有 Apple Make） | iPhone 拍照 | `by-date/photos/`（相机名）|
+| `IMG_4521.CR2` | 佳能 | `by-date/photos/`（相机名）|
 
 ### 归档目标
 
 ```
 /Volumes/Storage/
-├── by-date/
-│   └── 2026/
-│       ├── 2026-07/
-│       │   ├── photos/
-│       │   └── videos/
-│       └── 2026-07_海南/
-│           ├── photos/
-│           └── videos/
-└── screenshots/                  ← 所有截图 + 录屏 + 无元数据文件
-    ├── screenshot_20260715_xxx_iphone_a3f2.png         (iPhone 截图)
-    ├── screenshot_20260715_xxx_<hash>.mov              (macOS 录屏)
-    ├── screenshot_20260715_xxx_<hash>.mov              (iOS 录屏 RPReplay)
-    ├── screenshot_20260716_xxx_<hash>.mp4              (Android 录屏)
-    └── ...
+├── by-date/...
+├── screenshots/                  ← 仅截图（图）
+│   └── screenshot_20260715_xxx_iphone_a3f2.png
+└── screenrecords/                ← 仅录屏（视频）
+    ├── screenrecorder_20260715_xxx_<hash>.mov
+    └── screenrecorder_20260716_xxx_<hash>.mp4
 ```
 
 ### `rename_organize.py` 核心逻辑
 
 ```
 for each file in inbox:
-  exif = read_exif(file)               # PIL for images, ffprobe for videos
-  
-  if is_screenshot(file, exif, config):
-    # 截图/录屏走专用桶，保留前缀
-    new_name = f"screenshot_{date}_{source?}_{hash}.ext"
-    dest = <work>/screenshots/<new_name>
-  else:
-    # 照片/视频走 by-date
-    compute_date(file)
-    compute_source(file)
-    match_theme(...) -> Optional[theme_name]
-    bucket_type = "videos" if is_video(file) else "photos"
-    dest = <work>/by-date/<year>/<month>[_<theme>]/<bucket_type>/<new_name>
-
+  capture = classify_capture(...)   # screenshot | recording | normal
+  dest, name = compute_dest(work, file, capture)
+  # screenshot → screenshots/screenshot_...
+  # recording  → screenrecords/screenrecorder_...
+  # normal     → by-date/<year>/<month>[_theme]/photos|videos>/...
   shutil.move(file, dest)
 ```
 
-### EXIF GPS 读取实现
-
-**照片**（PIL）：
-
-```python
-from PIL import Image
-exif = Image.open(path)._getexif() or {}
-gps_info = exif.get(0x8825)
-```
-
-**视频**（ffprobe）：
-
-```bash
-ffprobe -v quiet -print_format json -show_entries format_tags /path/video.mp4
-# 检查 format_tags 是否有 location / GPSLatitude / GPSLongitude
-```
+Web 纠错复用同一套 `plan_destination` / `reclassify_paths`：
+- **移至截图录屏**：按后缀图→screenshot、视频→recording（不重跑启发式）
+- **移回普通分类**：force normal
+- **移至文档**：force docs（手机拍的证件/票据等）
+- 工具栏按当前页隐藏「已在目标」按钮（普通页无「移回普通」；截图/录屏页无「移至截图录屏」；文档页无「移至文档」）
 
 ### Web 浏览
 
 ```
-GET /screenshots                # 截图根目录（按 mtime 倒序，可分页）
-GET /screenshots/<hash>         # 单张查看
-GET /screenshots?ext=mp4        # 只看视频（v4 录屏多了）
-GET /screenshots?ext=mov
+GET  /screenshots           # 截图库
+GET  /screenrecords         # 录屏库
+GET  /docs                  # 文档库
+POST /api/reclassify        # {action: to_screen|to_normal|to_docs, paths:[...]}
+POST /api/star
 ```
 
-截图/录屏都支持 ★ 加星 → 写入 `_meta/stars/screenshots.json`。
+加星：`_meta/stars/screenshots.json` / `screenrecords.json` / `docs.json` / `<月份桶>.json`；重分类时自动迁移星标路径。
 
 ### 精选到 iPhone
 
 ```bash
-$ ./scripts/pick_to_iphone.py --bucket screenshots
-
-✓ 读取 _meta/stars/screenshots.json：12 张
-✓ 复制到 /Volumes/Storage/_favorite/screenshots/
-✓ 生成 _meta/scripts/favorite-screenshots.scpt
+./scripts/pick_to_iphone.py --bucket screenshots
+./scripts/pick_to_iphone.py --bucket screenrecords
 ```
 
-AppleScript 中 `albumName = "Screenshots"`（图片和录屏都在这个相簿里）。
+### 误判与纠错
 
-### 配置项
+| 场景 | 行为 |
+|---|---|
+| 相机文件名白名单 | 强制 by-date |
+| 无 GPS 社交图 | screenshots/（符合 v7）|
+| 元数据被剥的真照片（非相机名） | 可能进 screenshots/ → Web「移回普通分类」|
+| 已归档存量 | 不会自动重扫；用 Web 勾选纠错 |
 
-`config.yaml`：
-
-```yaml
-screenshot_detection:
-  enabled: true
-  
-  # 文件名关键字列表（任一匹配即识别为截图/录屏；大小写不敏感）
-  keywords:
-    - screenshot
-    - screenrecording
-    - screen recording
-    - screenrecord
-    - screenrecorder
-    - screencapture
-    - screen capture
-    - rpreplay
-  
-  output_dir: screenshots        # 归档根目录
-  
-  # GPS 启发式
-  no_gps_as_screenshot: true     # 无 GPS + 无相机标识 → 判为截图/录屏
-  
-  # 命名模板（截图/录屏统一加 screenshot_ 前缀）
-  naming_template: "screenshot_{date}_{source?}_{hash}.ext"
-```
-
-### 备份盘镜像
-
-`/Volumes/WD4T/MediaVault/` 下：
-
-```
-WD4T/MediaVault/
-├── by-date/
-├── screenshots/                  ← rsync 镜像（含图片 PNG/JPG/HEIC 和视频 MOV/MP4）
-├── _favorite/
-└── _vlogs/
-```
-
-### 误判与漏判
-
-| 场景 | 行为 | 说明 |
-|---|---|---|
-| Android 默认命名 `Screenshot_xxx.png` | ✅ 规则 1 命中 | Android 系统截图 |
-| macOS 录屏 `Screen Recording yyyy.mov` | ✅ 规则 1 命中 | |
-| iOS 录屏 `RPReplay_Final_xxx.mov` | ✅ 规则 1 命中 | |
-| 第三方 Android 录屏 `Screenrecorder_xxx.mp4` | ✅ 规则 1 命中 | |
-| 微信下载的视频 `wechat_video.mp4`（无 EXIF）| ✅ 规则 2 命中 | 无 GPS + 无 Make |
-| iPhone 默认截图 `IMG_XXXX.PNG`（无 EXIF）| ✅ 规则 2 命中 | PNG 无 EXIF |
-| iPhone 默认照片 `IMG_0001.HEIC`（有 Apple Make）| ❌ 不识别 | 有相机标识 |
-| 室内拍摄的真照片（关定位，有 Make）| ❌ 不识别 | 有相机标识 |
-| 佳能单反 `IMG_4521.CR2`（有 Canon Make，无 GPS）| ❌ 不识别 | 有相机标识 |
-| 元数据被剥离的相机照片 | ⚠️ 可能误判 | 手动挪回 by-date/photos/ |
-| 表情包（PNG，有 EXIF 元数据）| ❌ 不识别 | 文件名不含关键字 + 有 EXIF |
-
-### 配置选项：关闭 GPS 启发式
-
-误判太多时，设 `no_gps_as_screenshot: false`，退回"只按文件名匹配"。
-
-### 配置选项：自定义关键词
-
-用户可以加任意关键字到 `keywords` 列表，比如：
-```yaml
-keywords:
-  - screenshot
-  - screenrecording
-  - capture         # 某些截屏工具
-  - snip            # Windows Snip & Sketch
-```
+`--no-gps-rule` 在 v7 已废弃（激进规则默认始终开启）。
 
 ## 首次启动：SSD 迁移（用户准备数据，脚本处理）
 
@@ -546,7 +433,7 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
   --backup /Volumes/WD4T/MediaVault
 ```
 
-`--include` 显式白名单只镜像 `by-date/` `screenshots/` `_favorite/` `_vlogs/`，**不动 WD4T 其他内容**。
+`--include` 显式白名单只镜像 `by-date/` `screenshots/` `screenrecords/` `docs/` `_favorite/` `_vlogs/`，**不动 WD4T 其他内容**。
 
 ### 步骤 4：校验
 
@@ -575,13 +462,13 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
 
 | 脚本 | 作用 |
 |---|---|
-| `init_storage.sh` | 在指定根目录创建顶层目录骨架 |
+| `init_storage.sh` | 在指定根目录创建顶层目录骨架（含 `screenshots/` `screenrecords/`） |
 | `dedupe.py` | SHA-256 精确去重；源从 EXIF/`.source`/`--source` 三层识别；重复文件入 `_trash/` |
-| `rename_organize.py` | 重命名 + 归档到月份桶/主题桶 |
+| `rename_organize.py` | 重命名 + 归档；v7：by-date / screenshots / screenrecords |
 | `add_theme.py` | 交互式追加主题到 events.yaml |
 | `onboard_migrate.sh` | 把 `_pre_migration_backup/` 内容 stage 到 `working/inbox/`；不动 `_pre_migration_backup/` 本身 |
-| `sync_to_backup.sh` | rsync 工作盘 → 备份盘（默认 append-only） |
-| `web_browse.py` | 本地 Flask 画廊 + 加星 |
+| `sync_to_backup.sh` | rsync 工作盘 → 备份盘（白名单含 screenrecords；默认 append-only） |
+| `web_browse.py` | 本地画廊 + 加星 + 双向重分类（`/api/reclassify`） |
 | `pick_to_iphone.py` | 加星文件真实复制到 `_favorite/` + 生成 AppleScript |
 | `make_vlog.py` | 可选：EDL JSON + ffmpeg 轻量 vlog |
 
@@ -736,10 +623,11 @@ macOS Ventura+ Photos.app 左侧栏有 "Duplicates" 相簿。AppleScript 跑完�
 
 Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 
-- 路由：`/` `/y/<year>/m/<month>` `/y/<year>/m/<month>/t/<theme>` `/screenshots` `/themes` `POST /api/star` `/api/search` `/raw/<path:rel>`
-- 排序默认 `capture`
+- 路由：`/` `/y/<year>/<month>` `/screenshots` `/screenrecords` `/themes` `POST /api/star` `POST /api/reclassify` `/raw` `/thumb`
+- 排序默认 `capture`；缩略图懒加载
+- 画廊支持勾选 +「移至截图录屏 / 移回普通分类」
 - 仅监听 LAN；HEIC 缩略图走 macOS `sips`
-- 启动时校验 `--work` 在白名单内
+- 启动时校验 `--work` 在白名单内，并确保 `screenrecords/` 存在
 
 ## 数据安全分析
 
@@ -767,7 +655,7 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 | R11 | iCloud 空间不足 | onboarding 检查 iCloud 存储 |
 | R12 | iPhone 删除云端照片误删 Mac | iCloud Photos 设"下载并保留原始" |
 | R13 | iCloud 已有照片与导入重复 | `skip checking duplicates yes` + Photos Duplicates 人工合并 |
-| R14 | 元数据被剥离的真照片误判为截图 | 用户手动从 screenshots/ 挪回 by-date/photos/；或 config 关闭 GPS 启发式 |
+| R14 | 元数据被剥离的真照片误判为截图 | Web「移回普通分类」重命名回 by-date；相机文件名白名单可兜底 |
 
 ### 用户防丢数据操作清单
 
@@ -833,10 +721,12 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 | 去重 v1 | 仅精确 SHA-256 |
 | 文件夹结构 | 月份默认桶 + 主题旁挂桶（平级） |
 | 命名格式 | `YYYYMMDD_HHMMSS_<source>_<4hash>.ext`；source 不可识别时省略 |
-| 截图/录屏检测 | 文件名关键字命中（`screenshot`/`screenrecording`/`screenrecorder` 等）**OR** 无 GPS + 无相机标识；归档到根目录 `screenshots/` |
-| 文件名关键字 | 大小写不敏感子串匹配：`screenshot`, `screenrecording`, `screen recording`, `screenrecord`, `screenrecorder`, `screencapture`, `screen capture`, `rpreplay` |
-| 命名 | 统一保留 `screenshot_` 前缀：`screenshot_<date>_<source?>_<hash>.<ext>`（截图/录屏都用）|
-| 录屏视频 | 进 screenshots/（通过关键字或 GPS 规则）|
+| 截图/录屏检测 | **v7**：相机文件名白名单优先；图含 `screenshot` 或无 GPS → `screenshots/`；视频含 `record` 或（无 Make∨无 GPS）→ `screenrecords/` |
+| 文件名关键字 | 图：`screenshot`；视频：`record`（子串）|
+| 命名 | 截图 `screenshot_…`；录屏 `screenrecorder_…`；普通仍无日期模板 |
+| 录屏视频 | 进 `screenrecords/`（与截图分桶）|
+| Web 纠错 | 按页显示：移至截图录屏 / 移回普通分类 / 移至文档（隐藏当前桶对应按钮）|
+| 文档桶 | `docs/`，仅手动移入；命名 `doc_…` |
 | 精选目录 | `_favorite/` |
 | 精选子目录结构 | 带主题 → 同名子目录；无主题 → 平铺根 |
 | 带主题精选相簿名 | = 主题名（如 `"2026-07_海南"`） |
@@ -868,29 +758,17 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 - `dedupe.py`：5 对重复 → 识别 5 对
 - `dedupe.py` 源识别：iPhone/Canon/DJI/CLI/省略各路径
 - `rename_organize.py`：30 文件 + 主题 → 18+12；幂等
-- `rename_organize.py` 截图/录屏检测（v4）：
-  - **规则 1（文件名关键字命中）**：
-    - `Screenshot_2026-07-15.png` → `screenshots/`
-    - `Screen Recording 2026-07-15.mov` → `screenshots/`
-    - `Screenrecorder_20260715.mp4` → `screenshots/`
-    - `Screenrecord_2026-07-15_14-30-12.mp4` → `screenshots/`
-    - `RPReplay_Final_xxx.mov`（iOS 录屏）→ `screenshots/`
-    - `screencapture_xxx.mov`、`screen capture xxx.mov` → `screenshots/`
-  - **规则 2（无 GPS + 无相机标识）**：
-    - `IMG_0001.PNG`（iPhone 截图，无 EXIF）→ `screenshots/`
-    - 微信下载的 `wechat_video.mp4`（无 EXIF）→ `screenshots/`
-  - **不识别（仍进 by-date）**：
-    - `IMG_0001.HEIC`（有 Apple Make）→ `by-date/photos/`
-    - 室内拍摄的真照片（关定位但有 Apple/Samsung Make）→ `by-date/photos/`
-    - 佳能单反 `IMG_4521.CR2`（有 Canon Make，无 GPS）→ `by-date/photos/`
-  - 命名保留 `screenshot_` 前缀（截图/录屏统一）
-  - 截图/录屏全在一个根目录 `screenshots/`，不分月份不分主题
-  - `keywords` 列表大小写不敏感、子串匹配
-  - 视频按 ext 过滤（`?ext=mov` `?ext=mp4`）
+- `rename_organize.py` 截图/录屏检测（v7）：
+  - **截图 → screenshots/**：`Screenshot_….png`；无 GPS 的非相机名 JPG/PNG
+  - **录屏 → screenrecords/**：含 `record` 的视频；`RPReplay_*.mov`（无元数据）；无 Make/GPS 的普通视频
+  - **仍进 by-date**：`VID_…` / `IMG_…` 等相机文件名；有完整 Make+GPS 的视频
+  - 命名：截图 `screenshot_`、录屏 `screenrecorder_`
+  - `reclassify_paths(to_screen|to_normal)` 双向纠错
+- `web_browse.py`：`/screenshots` `/screenrecords` `/api/reclassify` 可用
 - `add_theme.py --interactive`：5 主题正确追加
 - `onboard_migrate.sh`：检测 `_pre_migration_backup/` 存在；stage 到 `working/inbox/`；`_pre_migration_backup/` 内容不变（sha256 一致）
-- `sync_to_backup.sh`：sha256 一致；WD4T 上 `garbage.txt`（root）不被 sync 改动
-- `web_browse.py`：4 路由 200
+- `sync_to_backup.sh`：sha256 一致；白名单含 `screenrecords/`；WD4T 上 `garbage.txt`（root）不被 sync 改动
+- `web_browse.py`：核心路由 200
 - `pick_to_iphone.py --bucket 2026-07_海南`：复制到 `_favorite/2026-07_海南/`，`.scpt` 中 `albumName = "2026-07_海南"`
 - `pick_to_iphone.py --bucket 2026-08`：复制到 `_favorite/` 平铺，`.scpt` 中 `albumName = "Picks"`
 - AppleScript 校验：

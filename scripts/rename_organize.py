@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-rename_organize.py - Rename + organize photos/videos/screenshots into by-date/YYYY/MM[/theme].
+rename_organize.py - Rename + organize photos/videos into by-date / screenshots / screenrecords.
 
-Detection chain:
-  1. Filename keyword (screenshot/screenrecording/rpreplay/etc.) → screenshots/
-  2. No EXIF GPS + no camera make → screenshots/ (covers screenshots + screen recordings)
-  3. Otherwise: theme match → by-date/<year>/<month>[_<theme>]/<photos|videos>/
+Classification (v7):
+  0. Known camera filename → by-date/ (normal)
+  Images:
+    1. Filename contains "screenshot" → screenshots/
+    2. No EXIF GPS → screenshots/
+  Videos:
+    1. Filename contains "record" → screenrecords/
+    2. Missing Make OR missing GPS → screenrecords/
+  Else → by-date/<year>/<month>[_theme]/<photos|videos>/
 
 Usage:
     ./rename_organize.py --work /Volumes/Storage --dry-run
@@ -13,13 +18,14 @@ Usage:
 """
 
 import argparse
-import time
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -65,17 +71,13 @@ EXIF_MAKE_MAP = {
     'Panasonic': 'panasonic', 'PANASONIC': 'panasonic',
 }
 
-# Keywords split into screenshot (image) vs recording (video) detection.
-# v6: removed the no-GPS + no-Make fallback because it misclassified
-# DJI action camera videos (no EXIF, often renamed) as screenshots.
+# Keywords: screenshot (images) vs record substring (videos).
 DEFAULT_SCREENSHOT_KEYWORDS = [
     'screenshot',
 ]
+# v7: any filename containing "record" (screenrecord / recording / …)
 DEFAULT_RECORDING_KEYWORDS = [
-    'screenrecording', 'screen recording',
-    'screenrecord', 'screenrecorder',
-    'screencapture', 'screen capture',
-    'rpreplay',
+    'record',
 ]
 
 # Known camera filename patterns (v5: real photos/videos, NOT screenshots)
@@ -197,6 +199,31 @@ def has_gps(exif: dict) -> bool:
 
 def has_camera_make(exif: dict) -> bool:
     return bool(get_make_from_exif(exif))
+
+
+def has_video_make(video_tags: dict) -> bool:
+    if not video_tags:
+        return False
+    for k in ('make', 'manufacturer', 'com.apple.quicktime.make'):
+        if str(video_tags.get(k, '')).strip():
+            return True
+    return False
+
+
+def has_video_gps(video_tags: dict) -> bool:
+    """Best-effort GPS/location tags from ffprobe. Missing → treat as no GPS."""
+    if not video_tags:
+        return False
+    for k in (
+        'location',
+        'com.apple.quicktime.location.ISO6709',
+        'com.apple.quicktime.location.name',
+        'gps-coordinates',
+        'location-eng',
+    ):
+        if str(video_tags.get(k, '')).strip():
+            return True
+    return False
 
 
 # === Video metadata ===
@@ -338,51 +365,53 @@ def _normalize_source(name: str) -> str:
     return s or "unknown"
 
 
-# === Screenshot detection (v4) ===
+# === Capture classification (v7) ===
 
 def classify_capture(path: Path, exif: dict, video_tags: dict,
-                      screenshot_keywords: list, recording_keywords: list,
-                      no_gps: bool) -> str:
-    """v6 classification: returns one of 'recording', 'screenshot', or 'normal'.
+                      screenshot_keywords: list = None,
+                      recording_keywords: list = None,
+                      no_gps: bool = True) -> str:
+    """v7 classification: 'recording' | 'screenshot' | 'normal'.
 
     Logic:
-      0. Known camera filename pattern → 'normal' (real photos/videos)
-      1a. Recording keyword in filename → 'recording'
-      1b. Screenshot keyword in filename → 'screenshot'
-      2. (Optional) no GPS + no Make → 'screenshot' or 'recording' depending on file type
+      0. Known camera filename → normal
+      Images:
+        1. Filename contains screenshot keyword → screenshot
+        2. No EXIF GPS → screenshot
+      Videos:
+        1. Filename contains record keyword → recording
+        2. Missing Make OR missing GPS → recording
+      Else → normal
+
+    ``no_gps`` is kept for CLI compatibility; aggressive GPS/Make rules are
+    always on in v7 (the flag is ignored).
     """
-    # Rule 0 (v5): known camera filename pattern → normal real camera file
+    del no_gps  # always-on in v7
+    screenshot_keywords = screenshot_keywords or DEFAULT_SCREENSHOT_KEYWORDS
+    recording_keywords = recording_keywords or DEFAULT_RECORDING_KEYWORDS
+
     if is_camera_filename(path):
         return 'normal'
 
-    # Normalize: lowercase + treat underscores/dots as spaces for matching
-    # So "Screen_Recording_2026.mov" matches keyword "screen recording"
     name_lower = path.name.lower()
     name_normalized = name_lower.replace('_', ' ').replace('.', ' ').replace('-', ' ')
 
-    # Rule 1: recording keyword (videos) - "screenrecorder" related
-    for kw in recording_keywords:
-        if kw.lower() in name_normalized:
+    if is_video(path):
+        for kw in recording_keywords:
+            if kw.lower() in name_normalized:
+                return 'recording'
+        has_make = has_video_make(video_tags)
+        has_loc = has_video_gps(video_tags)
+        if (not has_make) or (not has_loc):
             return 'recording'
+        return 'normal'
 
-    # Rule 1: screenshot keyword (images) - "screenshot" related
+    # Images (and other non-video media)
     for kw in screenshot_keywords:
         if kw.lower() in name_normalized:
             return 'screenshot'
-
-    # Rule 2 (opt-in): no GPS + no camera make fallback (disabled by default in v6)
-    # Per user feedback, this rule was too aggressive - DJI action camera videos
-    # (no EXIF, often renamed) got misclassified. Disabled by default.
-    if no_gps:
-        # Image: PNG without EXIF likely = screenshot
-        # Video: only flag if it really looks like a recording
-        if is_video(path):
-            # Even videos without metadata are now NORMAL videos, not recordings
-            return 'normal'
-        # For images: keep the legacy rule (PNG without EXIF likely screenshot)
-        if path.suffix.lower() == '.png':
-            return 'screenshot'
-
+    if not has_gps(exif):
+        return 'screenshot'
     return 'normal'
 
 
@@ -395,6 +424,155 @@ def is_screenshot(path: Path, exif: dict, video_tags: dict,
                               DEFAULT_SCREENSHOT_KEYWORDS,
                               DEFAULT_RECORDING_KEYWORDS, no_gps)
     return result in ('screenshot', 'recording')
+
+
+def star_bucket_for_rel(rel: str) -> str:
+    """Map a work-relative path to its stars JSON bucket name."""
+    parts = Path(rel).parts
+    if not parts:
+        return 'unknown'
+    if parts[0] in ('screenshots', 'screenrecords', 'docs'):
+        return parts[0]
+    if parts[0] == 'by-date' and len(parts) >= 3:
+        return parts[2]
+    return parts[0]
+
+
+def compute_dest(work: Path, src: Path, capture_type: str,
+                 events: list = None, cli_source: Optional[str] = None,
+                 exif: dict = None, video_tags: dict = None) -> tuple:
+    """Compute (dest_path, new_name, capture_type) for a file.
+
+    Does not move. ``capture_type``: screenshot|recording|docs|normal.
+    """
+    events = events if events is not None else []
+    if exif is None:
+        exif = read_exif(src)
+    if video_tags is None:
+        video_tags = read_video_metadata(src) if is_video(src) else {}
+
+    date = get_date(src, exif)
+    source = get_source(src, exif, video_tags, cli_source)
+    h = sha256_short(src)
+    ext = src.suffix.lower()
+    source_part = f"{source}_" if source else ""
+
+    if capture_type == 'recording':
+        dest_dir = work / 'screenrecords'
+        new_name = f"screenrecorder_{date}_{source_part}{h}{ext}"
+    elif capture_type == 'screenshot':
+        dest_dir = work / 'screenshots'
+        new_name = f"screenshot_{date}_{source_part}{h}{ext}"
+    elif capture_type == 'docs':
+        dest_dir = work / 'docs'
+        new_name = f"doc_{date}_{source_part}{h}{ext}"
+    else:
+        theme = match_theme(src, date, source, events)
+        year = date[:4]
+        month = date[:6]
+        bucket_type = 'videos' if is_video(src) else 'photos'
+        if theme:
+            theme_name = theme.get('name', '').strip()
+            if theme_name:
+                month_dir_name = f"{month[:4]}-{month[4:]}_{theme_name}"
+            else:
+                month_dir_name = f"{month[:4]}-{month[4:]}"
+        else:
+            month_dir_name = f"{month[:4]}-{month[4:]}"
+        dest_dir = work / 'by-date' / year / month_dir_name / bucket_type
+        new_name = f"{date}_{source_part}{h}{ext}"
+
+    dest = get_unique_dest(dest_dir / new_name)
+    return dest, new_name, capture_type
+
+
+def plan_destination(work: Path, path: Path, force_type: Optional[str] = None,
+                     events: list = None, cli_source: Optional[str] = None,
+                     screenshot_keywords: list = None,
+                     recording_keywords: list = None) -> tuple:
+    """Plan dest for path. force_type: None | screenshot | recording | docs | normal.
+
+    Returns (dest_path, capture_type, new_name).
+    """
+    exif = read_exif(path)
+    video_tags = read_video_metadata(path) if is_video(path) else {}
+    if force_type in ('screenshot', 'recording', 'docs', 'normal'):
+        capture_type = force_type
+    else:
+        capture_type = classify_capture(
+            path, exif, video_tags,
+            screenshot_keywords or DEFAULT_SCREENSHOT_KEYWORDS,
+            recording_keywords or DEFAULT_RECORDING_KEYWORDS,
+            True,
+        )
+    dest, new_name, capture_type = compute_dest(
+        work, path, capture_type, events=events, cli_source=cli_source,
+        exif=exif, video_tags=video_tags,
+    )
+    return dest, capture_type, new_name
+
+
+def reclassify_paths(work: Path, paths: list, action: str,
+                     dry_run: bool = False, events: list = None) -> list:
+    """Reclassify files. action: 'to_screen' | 'to_normal' | 'to_docs'.
+
+    to_screen: image → screenshot, video → recording (by suffix).
+    to_normal: force normal (by-date naming).
+    to_docs: force docs/ (manual document photos).
+    """
+    if action not in ('to_screen', 'to_normal', 'to_docs'):
+        raise ValueError(f'unknown action: {action}')
+    events = events if events is not None else load_events(work, None)
+    results = []
+    work_res = work.resolve()
+
+    for rel in paths:
+        rel = str(rel).lstrip('/')
+        src = (work / rel).resolve()
+        item = {'ok': False, 'src': rel, 'dest': None, 'capture_type': None}
+        try:
+            if not str(src).startswith(str(work_res) + os.sep) and src != work_res:
+                item['error'] = 'path outside work'
+                results.append(item)
+                continue
+            if not src.is_file():
+                item['error'] = 'not a file'
+                results.append(item)
+                continue
+
+            if action == 'to_screen':
+                force = 'recording' if is_video(src) else 'screenshot'
+            elif action == 'to_docs':
+                force = 'docs'
+            else:
+                force = 'normal'
+
+            dest, capture_type, new_name = plan_destination(
+                work, src, force_type=force, events=events,
+            )
+            item['capture_type'] = capture_type
+            item['dest'] = str(dest.relative_to(work))
+            item['new_name'] = new_name
+
+            if src.resolve() == dest.resolve():
+                item['ok'] = True
+                item['skipped'] = True
+                results.append(item)
+                continue
+
+            if dry_run:
+                item['ok'] = True
+                results.append(item)
+                continue
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            item['ok'] = True
+        except Exception as e:
+            item['error'] = str(e)
+        results.append(item)
+
+    return results
 
 
 # === Theme matching ===
@@ -642,59 +820,22 @@ def get_unique_dest(dest: Path) -> Path:
 
 def process_file(work: Path, f: Path, events: list, cli_source: Optional[str],
                  screenshot_keywords: list, recording_keywords: list,
-                 no_gps: bool, dry_run: bool,
-                 screenshots_dir: Path, by_date_dir: Path, stats: dict):
-    exif = read_exif(f)
-    video_tags = read_video_metadata(f) if is_video(f) else {}
-
-    date = get_date(f, exif)
-    source = get_source(f, exif, video_tags, cli_source)
-    capture_type = classify_capture(f, exif, video_tags,
-                                     screenshot_keywords, recording_keywords, no_gps)
-
-    h = sha256_short(f)
-    ext = f.suffix.lower()
-    source_part = f"{source}_" if source else ""
-
-    # v6: naming prefix depends on capture type
-    if capture_type == 'recording':
-        # Video screen recording → screenrecorder_ prefix
-        new_name = f"screenrecorder_{date}_{source_part}{h}{ext}"
-        dest_dir = screenshots_dir
-    elif capture_type == 'screenshot':
-        # Image screenshot → screenshot_ prefix
-        new_name = f"screenshot_{date}_{source_part}{h}{ext}"
-        dest_dir = screenshots_dir
-    else:
-        theme = match_theme(f, date, source, events)
-        year = date[:4]
-        month = date[:6]
-
-        bucket_type = 'videos' if is_video(f) else 'photos'
-
-        if theme:
-            theme_name = theme.get('name', '').strip()
-            if theme_name:
-                # month is YYYYMM (e.g., 202407); insert dash for display
-                month_dir_name = f"{month[:4]}-{month[4:]}_{theme_name}"
-            else:
-                month_dir_name = f"{month[:4]}-{month[4:]}"
-        else:
-            month_dir_name = f"{month[:4]}-{month[4:]}"
-
-        dest_dir = by_date_dir / year / month_dir_name / bucket_type
-        new_name = f"{date}_{source_part}{h}{ext}"
-
-    dest = get_unique_dest(dest_dir / new_name)
+                 no_gps: bool, dry_run: bool, stats: dict):
+    dest, capture_type, _new_name = plan_destination(
+        work, f, force_type=None, events=events, cli_source=cli_source,
+        screenshot_keywords=screenshot_keywords,
+        recording_keywords=recording_keywords,
+    )
+    # no_gps ignored in v7; kept in signature for call-site compatibility
+    del no_gps
 
     if dry_run:
         print(f"  [dry-run] {f.relative_to(work)} -> {dest.relative_to(work)}")
     else:
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(f), str(dest))
         stats['moved'] += 1
 
-    # Update stats
     if capture_type == 'recording':
         stats['recordings'] += 1
     elif capture_type == 'screenshot':
@@ -706,7 +847,8 @@ def process_file(work: Path, f: Path, events: list, cli_source: Optional[str],
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Rename + organize into by-date/YYYY/MM/[theme]/')
+    parser = argparse.ArgumentParser(
+        description='Rename + organize into by-date / screenshots / screenrecords')
     parser.add_argument('--work', default='/Volumes/Storage',
                         help='Working disk root (default: /Volumes/Storage)')
     parser.add_argument('--apply-events', default=None,
@@ -715,7 +857,7 @@ def main():
                         help='Default source for files without EXIF (e.g., iphone, canon)')
     parser.add_argument('--no-gps-rule', dest='no_gps_rule', action='store_true',
                         default=False,
-                        help='Re-enable the no-GPS+no-make screenshot fallback (default: off since v6)')
+                        help='Deprecated (v7): aggressive GPS/Make rules are always on')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
@@ -736,8 +878,12 @@ def main():
         print("✓ Nothing to process")
         return
 
-    screenshots_dir = work / 'screenshots'
-    by_date_dir = work / 'by-date'
+    # Ensure destination roots exist on apply
+    if not args.dry_run:
+        (work / 'screenshots').mkdir(parents=True, exist_ok=True)
+        (work / 'screenrecords').mkdir(parents=True, exist_ok=True)
+        (work / 'docs').mkdir(parents=True, exist_ok=True)
+        (work / 'by-date').mkdir(parents=True, exist_ok=True)
 
     stats = {'moved': 0, 'screenshots': 0, 'recordings': 0, 'photos': 0, 'videos': 0}
     total = len(files)
@@ -750,7 +896,7 @@ def main():
                 work, f, events, args.source,
                 DEFAULT_SCREENSHOT_KEYWORDS, DEFAULT_RECORDING_KEYWORDS,
                 args.no_gps_rule,
-                args.dry_run, screenshots_dir, by_date_dir, stats
+                args.dry_run, stats
             )
         except Exception as e:
             print(f"  [error] {f.relative_to(work)}: {e}", file=sys.stderr)

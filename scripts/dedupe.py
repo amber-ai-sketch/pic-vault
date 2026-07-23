@@ -18,6 +18,7 @@ import hashlib
 import os
 import shutil
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -72,12 +73,18 @@ def scan_files(work: Path, batch: "Optional[str]") -> list[Path]:
 def find_duplicates(files: list[Path]) -> dict[str, list[Path]]:
     """Group files by SHA-256; return only groups with >1 entry."""
     hashes = defaultdict(list)
-    for f in files:
+    total = len(files)
+    last_report = time.monotonic()
+    for i, f in enumerate(files, 1):
         try:
             h = sha256_file(f)
             hashes[h].append(f)
         except (OSError, IOError) as e:
-            print(f"  [skip] {f}: {e}", file=sys.stderr)
+            print(f"  [skip] {f}: {e}", file=sys.stderr, flush=True)
+        now = time.monotonic()
+        if i == total or i % 50 == 0 or (now - last_report) >= 2.0:
+            print(f"  hashed {i}/{total}", flush=True)
+            last_report = now
     return {h: paths for h, paths in hashes.items() if len(paths) > 1}
 
 
@@ -116,19 +123,19 @@ def main():
 
     batch = args.batch or datetime.now().strftime('%Y-%m-%d')
 
-    print(f"→ Scanning {work}/inbox/{args.batch or ''}")
+    print(f"→ Scanning {work}/inbox/{args.batch or ''}", flush=True)
     files = scan_files(work, args.batch)
-    print(f"  {len(files)} files")
+    print(f"  {len(files)} files", flush=True)
 
     if not files:
-        print("✓ Nothing to process")
+        print("✓ Nothing to process", flush=True)
         return
 
-    print("→ Computing SHA-256...")
+    print("→ Computing SHA-256...", flush=True)
     dupes = find_duplicates(files)
 
     if not dupes:
-        print("✓ No duplicates found")
+        print("✓ No duplicates found", flush=True)
         return
 
     total_kept = 0
@@ -138,20 +145,20 @@ def main():
         keep = pick_keep(paths)
         drop = sorted([p for p in paths if p != keep],
                       key=lambda p: str(p))
-        print(f"\n  duplicate group sha256:{h[:8]}...")
-        print(f"    KEEP   {keep.relative_to(work)}  ({keep.stat().st_size:,} bytes)")
+        print(f"\n  duplicate group sha256:{h[:8]}...", flush=True)
+        print(f"    KEEP   {keep.relative_to(work)}  ({keep.stat().st_size:,} bytes)", flush=True)
         for d in drop:
-            print(f"    TRASH  {d.relative_to(work)}  ({d.stat().st_size:,} bytes)")
+            print(f"    TRASH  {d.relative_to(work)}  ({d.stat().st_size:,} bytes)", flush=True)
             if not args.dry_run:
                 try:
                     move_to_trash(work, d, batch)
                     total_trashed += 1
                 except Exception as e:
-                    print(f"    [error] {e}", file=sys.stderr)
+                    print(f"    [error] {e}", file=sys.stderr, flush=True)
         total_kept += 1
 
     prefix = '[dry-run] Would' if args.dry_run else '✓ Did'
-    print(f"\n{prefix} keep {total_kept} files, trash {total_trashed} duplicates to {work}/_trash/{batch}/")
+    print(f"\n{prefix} keep {total_kept} files, trash {total_trashed} duplicates to {work}/_trash/{batch}/", flush=True)
 
 
 if __name__ == '__main__':
