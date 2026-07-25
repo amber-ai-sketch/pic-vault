@@ -284,6 +284,82 @@ def main():
     else:
         print(f"  ✗ FAIL VID_ routing: {out}")
 
+    # === Test 6a: Live Photo pair ===
+    section("6a. rename_organize.py - Live Photo pair → photos/ with _live_")
+
+    shutil.rmtree(work / 'inbox', ignore_errors=True)
+    shutil.rmtree(work / 'by-date', ignore_errors=True)
+    shutil.rmtree(work / 'screenshots', ignore_errors=True)
+    shutil.rmtree(work / 'screenrecords', ignore_errors=True)
+    (work / 'inbox').mkdir(parents=True)
+    (inbox / 'IMG_1000.HEIC').write_bytes(b'fake heic live still')
+    (inbox / 'IMG_1000.MOV').write_bytes(b'fake mov live motion')
+    (inbox / 'random.jpg').write_bytes(b'fake jpg')
+    (inbox / 'random.mov').write_bytes(b'fake random mov')
+
+    rc, out, err = run([
+        'python3', str(SCRIPTS / 'rename_organize.py'),
+        '--work', str(work),
+        '--dry-run',
+        '--source', 'iphone',
+    ])
+    if rc == 0:
+        if ('[live-pair]' in out and 'photos/' in out and '_live_' in out
+                and 'IMG_1000.HEIC' in out and 'IMG_1000.MOV' in out):
+            # both sides under photos/, not videos/ for the MOV half
+            live_lines = [ln for ln in out.splitlines() if 'live-pair' in ln and 'IMG_1000' in ln]
+            mov_ok = any('photos/' in ln and '.mov' in ln.lower() for ln in live_lines)
+            if mov_ok and 'live_pairs:' in out:
+                print("  ✓ Live Photo pair → photos/ with shared _live_ stem")
+            else:
+                print(f"  ✗ FAIL live pair dest: {live_lines}")
+        else:
+            print(f"  ✗ FAIL live pair missing markers: {out}")
+        # non-camera random.jpg+.mov must not be force-paired
+        if '[live-pair]' in out and 'random.jpg' in out:
+            # only fail if random was paired
+            bad = [ln for ln in out.splitlines() if 'live-pair' in ln and 'random' in ln]
+            if bad:
+                print(f"  ✗ FAIL: random.jpg/.mov should not pair: {bad}")
+            else:
+                print("  ✓ non-camera jpg+mov not paired")
+        else:
+            print("  ✓ non-camera jpg+mov not paired")
+    else:
+        print(f"  ✗ FAIL: rc={rc}, stderr={err}")
+
+    # orphan HEIC (no mov) — no _live_
+    shutil.rmtree(work / 'inbox', ignore_errors=True)
+    (work / 'inbox').mkdir(parents=True)
+    (inbox / 'IMG_2000.HEIC').write_bytes(b'orphan heic')
+    rc, out, err = run([
+        'python3', str(SCRIPTS / 'rename_organize.py'),
+        '--work', str(work),
+        '--dry-run',
+        '--source', 'iphone',
+    ])
+    if rc == 0 and '[live-pair]' not in out and '_live_' not in out and 'photos/' in out:
+        print("  ✓ orphan HEIC has no _live_ marker")
+    else:
+        print(f"  ✗ FAIL orphan HEIC: {out}")
+
+    # Cross-folder split (stock layout): HEIC in A/, MOV in B/
+    shutil.rmtree(work / 'inbox', ignore_errors=True)
+    (work / 'inbox' / 'Photos').mkdir(parents=True)
+    (work / 'inbox' / 'Videos').mkdir(parents=True)
+    (work / 'inbox' / 'Photos' / 'IMG_3000.HEIC').write_bytes(b'cross still')
+    (work / 'inbox' / 'Videos' / 'IMG_3000.MOV').write_bytes(b'cross mov')
+    rc, out, err = run([
+        'python3', str(SCRIPTS / 'rename_organize.py'),
+        '--work', str(work),
+        '--dry-run',
+        '--source', 'iphone',
+    ])
+    if rc == 0 and 'live-pair-cross' in out and '_live_' in out and 'photos/' in out:
+        print("  ✓ cross-folder Live Photo reunited into photos/")
+    else:
+        print(f"  ✗ FAIL cross-folder pair: {out}\nstderr={err}")
+
     # === Test 6b: reclassify helpers ===
     section("6b. rename_organize.reclassify_paths")
     import rename_organize as ro
@@ -301,11 +377,20 @@ def main():
         to_docs = ro.reclassify_paths(work, [results[0]['dest']], 'to_docs', dry_run=False)
         if to_docs and to_docs[0].get('ok') and str(to_docs[0].get('dest', '')).startswith('docs/'):
             print("  ✓ to_docs moved into docs/")
-            back = ro.reclassify_paths(work, [to_docs[0]['dest']], 'to_normal', dry_run=False)
-            if back and back[0].get('ok') and 'by-date/' in str(back[0].get('dest', '')):
-                print("  ✓ to_normal moved image back to by-date/")
+            to_things = ro.reclassify_paths(work, [to_docs[0]['dest']], 'to_things', dry_run=False)
+            if to_things and to_things[0].get('ok') and str(to_things[0].get('dest', '')).startswith('things/'):
+                dest_name = Path(to_things[0]['dest']).name
+                if dest_name.startswith('things_'):
+                    print("  ✓ to_things moved into things/ with things_ prefix")
+                else:
+                    print(f"  ✗ FAIL to_things naming: {dest_name}")
+                back = ro.reclassify_paths(work, [to_things[0]['dest']], 'to_normal', dry_run=False)
+                if back and back[0].get('ok') and 'by-date/' in str(back[0].get('dest', '')):
+                    print("  ✓ to_normal moved image back to by-date/")
+                else:
+                    print(f"  ✗ FAIL to_normal: {back}")
             else:
-                print(f"  ✗ FAIL to_normal: {back}")
+                print(f"  ✗ FAIL to_things: {to_things}")
         else:
             print(f"  ✗ FAIL to_docs: {to_docs}")
     else:
@@ -438,7 +523,7 @@ def main():
         '--work', str(work2)
     ])
     if rc == 0:
-        for d in ('inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', '_favorite', '_vlogs', '_trash', '_meta'):
+        for d in ('inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_favorite', '_vlogs', '_trash', '_meta'):
             if (work2 / d).exists():
                 print(f"  ✓ Created {d}/")
             else:

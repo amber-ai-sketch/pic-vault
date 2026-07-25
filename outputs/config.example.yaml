@@ -197,6 +197,7 @@ sync:
     - screenshots
     - screenrecords
     - docs
+    - things
     - _favorite
     - _vlogs
 
@@ -231,7 +232,8 @@ web_browse:
   # 缩略图生成工具：sips（macOS 内置，推荐）| pil
   thumb_tool: sips
 
-  # 双向纠错：POST /api/reclassify {action: to_screen|to_normal, paths:[...]}
+  # 纠错：POST /api/reclassify
+  # {action: to_screen|to_normal|to_docs|to_things|to_default_month, paths:[...]}
   reclassify: true
 
 # ============================================================

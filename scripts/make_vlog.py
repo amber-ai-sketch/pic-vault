@@ -23,15 +23,23 @@ EDL JSON schema:
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_TRANSITIONS = frozenset({
+    'concat',
+    'crossfade-0.5s',
+    'crossfade-1s',
+})
 
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
+    if os.environ.get("DUPEGURU_TEST") == "1":
+        return Path(path_str).expanduser().resolve()
     p = Path(path_str).expanduser().resolve()
     for prefix in allowed_prefixes:
         prefix_resolved = str(Path(prefix).resolve())
@@ -41,6 +49,44 @@ def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
         f"--{kind} {path_str} is not in path whitelist.\n"
         f"  Allowed: {', '.join(allowed_prefixes)}"
     )
+
+
+def _under_work(work: Path, path: Path) -> bool:
+    work_r = work.resolve()
+    path_r = path.resolve()
+    return path_r == work_r or str(path_r).startswith(str(work_r) + os.sep)
+
+
+def validate_clip(work: Path, clip: dict, index: int) -> dict:
+    """Sanitize one EDL clip: path under work, in/out as floats."""
+    if not isinstance(clip, dict):
+        raise ValueError(f"clips[{index}]: must be an object")
+    raw_path = clip.get('path')
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError(f"clips[{index}]: path required")
+    p = Path(raw_path)
+    if p.is_absolute() or '..' in p.parts:
+        raise ValueError(f"clips[{index}]: path must be work-relative without '..': {raw_path}")
+    full = (work / p).resolve()
+    if not _under_work(work, full):
+        raise ValueError(f"clips[{index}]: path escapes work: {raw_path}")
+    try:
+        in_t = float(clip.get('in', 0))
+        out_t = float(clip['out'])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(f"clips[{index}]: in/out must be numbers ({e})") from e
+    if out_t <= in_t:
+        raise ValueError(f"clips[{index}]: out ({out_t}) must be > in ({in_t})")
+    return {'path': full, 'in': in_t, 'out': out_t}
+
+
+def validate_transition(transition: str) -> str:
+    if transition not in ALLOWED_TRANSITIONS:
+        raise ValueError(
+            f"transition {transition!r} not allowed.\n"
+            f"  Allowed: {', '.join(sorted(ALLOWED_TRANSITIONS))}"
+        )
+    return transition
 
 
 def find_ffmpeg() -> str:
@@ -155,12 +201,18 @@ def main():
         print(f"ERROR: invalid EDL JSON: {e}")
         sys.exit(1)
 
-    clips = edl.get('clips', [])
-    if not clips:
+    clips_raw = edl.get('clips', [])
+    if not clips_raw:
         print("ERROR: EDL has no clips")
         sys.exit(1)
 
-    transition = args.style
+    try:
+        transition = validate_transition(args.style)
+        clips = [validate_clip(work, c, i) for i, c in enumerate(clips_raw)]
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
     filter_str, v_label, a_label = build_filter_complex(clips, transition)
 
     output_path = work / '_vlogs' / f"{args.theme}.mp4"
@@ -168,7 +220,7 @@ def main():
 
     cmd = [find_ffmpeg(), '-y']
     for c in clips:
-        cmd += ['-i', str(work / c['path'])]
+        cmd += ['-i', str(c['path'])]
     cmd += [
         '-filter_complex', filter_str,
         '-map', v_label,

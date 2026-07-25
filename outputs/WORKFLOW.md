@@ -53,7 +53,7 @@ $EDITOR config.yaml   # 检查路径是否一致
 ```bash
 ./scripts/init_storage.sh
 # 默认在 /Volumes/Storage/ 创建顶层目录骨架：
-#   inbox/ by-date/ screenshots/ screenrecords/ docs/ _favorite/ _vlogs/ _trash/ _meta/
+#   inbox/ by-date/ screenshots/ screenrecords/ docs/ things/ _favorite/ _vlogs/ _trash/ _meta/
 # 可重跑，幂等
 ```
 
@@ -110,8 +110,9 @@ rsync -avh --progress /Volumes/WD4T/MediaVault/ /Volumes/YM/MediaVault/_pre_migr
 # 加主题（如已知历史主题）
 ./scripts/add_theme.py --work /Volumes/YM/MediaVault/working --interactive
 
-# 重命名再跑一次（让已分桶的文件搬到主题桶）
-./scripts/rename_organize.py --work /Volumes/YM/MediaVault/working
+# 按主题同步（不要再跑 rename；rename 只处理 inbox）
+picvault theme rebucket --theme <主题名> --yes
+# 或：./scripts/rename_organize.py --work … --rebucket-themes --theme <主题名>
 ```
 
 ### 步骤 3：rsync 回 WD4T
@@ -132,7 +133,7 @@ rsync -avh --progress /Volumes/WD4T/MediaVault/ /Volumes/YM/MediaVault/_pre_migr
   --backup /Volumes/WD4T/MediaVault
 ```
 
-期望输出"全部 sha256 一致"。
+期望输出"Verification passed: size/mtime match"。
 
 ### 步骤 5：人工收尾
 
@@ -188,6 +189,9 @@ inbox/
 ```bash
 ./scripts/rename_organize.py
 # 读 _meta/events.yaml 的主题配置
+# 1) 扫 inbox/：重命名 + 分桶（可为空）
+# 2) 不再自动全量同步主题（避免冲掉各主题桶手工调整）
+#    主题生效：picvault theme rebucket --theme <名> [--yes]
 # 截图/录屏检测（v7）：
 #   0. 已知相机文件名（IMG_/VID_/DJI_/…）→ by-date/（normal）
 #   图片：含 screenshot → screenshots/；无 GPS → screenshots/
@@ -203,6 +207,7 @@ inbox/
 | 截图（图） | `/Volumes/Storage/screenshots/` | `screenshot_<date>_<source?>_<hash>.ext` |
 | 录屏（视频） | `/Volumes/Storage/screenrecords/` | `screenrecorder_<date>_<source?>_<hash>.ext` |
 | 文档（手动） | `/Volumes/Storage/docs/` | `doc_<date>_<source?>_<hash>.ext`（Web 勾选「移至文档」，不自动分类）|
+| 物品（手动） | `/Volumes/Storage/things/` | `things_<date>_<source?>_<hash>.ext`（Web 勾选「移至物品」，不自动分类）|
 
 > **示例**：
 > - `Screenshot_….png` → 关键字 → `screenshots/`
@@ -210,12 +215,16 @@ inbox/
 > - Android `Screenrecorder_….mp4` → 含 `record` → `screenrecords/`
 > - iOS `RPReplay_Final_….mov`（无 Make/GPS）→ `screenrecords/`
 > - `VID_….mp4` / `IMG_….HEIC`（相机文件名白名单）→ `by-date/`
+> - **Live Photo**：同名 `IMG_xxxx.HEIC` + `IMG_xxxx.MOV`（同目录，或 inbox 内跨文件夹但 stem 全局唯一）→ 成对进 `by-date/.../photos/`，共用 stem `<date>_<source>_live_<hash>.{heic,mov}`（无 source 则为 `<date>_live_<hash>`）；跨目录配对日志为 `[live-pair-cross]`。同名多份有歧义则跳过并告警。Web 画廊只显示静图并标 Live。单边仍按普通照片/视频规则。
 > - 手机拍的证件/票据 → 整理进 by-date 后，在 Web 勾选「移至文档」
+> - 物品照片/视频 → 整理进 by-date 后，在 Web 勾选「移至物品」
 
-幂等：可重复跑，已分桶的文件会被搬到主题桶。存量误分可用 Web 纠错（按当前页只显示可去的目标）：
-- 普通分类页：移至截图录屏 / 移至文档
-- 截图、录屏页：移回普通分类 / 移至文档
-- 文档页：移至截图录屏 / 移回普通分类
+幂等：可重复跑 rename（inbox）。主题请按主题同步；全量 `--all` 会按配置收敛所有主题桶。存量误分可用 Web 纠错（按当前页只显示可去的目标）：
+- 普通分类页：移至截图录屏 / 移至文档 / 移至物品
+- 主题桶页：放回默认月桶 / 移至截图录屏 / 移至文档 / 移至物品
+- 截图、录屏页：移回普通分类 / 移至文档 / 移至物品
+- 文档页：移至截图录屏 / 移回普通分类 / 移至物品
+- 物品页：移至截图录屏 / 移回普通分类 / 移至文档
 
 ### 5. 添加主题（按需）
 
@@ -224,7 +233,7 @@ inbox/
 # 提示输入：主题名 / 月份 / 日期范围 / 来源设备 / 显式文件列表
 # 写入 _meta/events.yaml
 
-./scripts/rename_organize.py    # 再跑一次让新主题生效
+picvault theme rebucket --theme <主题名> --yes   # 让该主题配置生效到 by-date
 ```
 
 ### 6. Web 浏览 + 加星
@@ -236,11 +245,11 @@ inbox/
 
 # 在月份/主题/截图/录屏页面：
 #   · 点 ★ 加星 → _meta/stars/<bucket>.json
-#   · 勾选文件 → 按当前页显示可用目标（移至截图录屏 / 移回普通分类 / 移至文档）
+#   · 勾选文件 → 按当前页显示可用目标（主题桶可「放回默认月桶」；另有移至截图录屏 / 移回普通分类 / 移至文档 / 移至物品）
 #   · 「移至回收站」→ _trash/<批次>/…（软删除，可找回；不进备份盘）
 ```
 
-导航含 **加星**（`/starred` 汇总全部 ★）、**截图**、**录屏**、**文档**。`web_browse.py` 后台跑着就行。
+导航含 **加星**（`/starred` 汇总全部 ★）、**截图**、**录屏**、**文档**、**物品**。`web_browse.py` 后台跑着就行。
 
 ### 7. 导出精选到 iPhone
 
@@ -281,7 +290,7 @@ AppleScript 自动打开 Photos.app、建相簿、导入、打星标。
 ./scripts/sync_to_backup.sh --verify
 ```
 
-期望"全部 sha256 一致"。
+期望"Verification passed: size/mtime match"。
 
 ### 12. 人工收尾
 
@@ -335,12 +344,38 @@ EOF
 
 ### 调整主题
 
+在 Web 打开 `/themes` 可直接编辑 `_meta/events.yaml`（保存前校验；原文件备份为 `events.yaml.bak`）。也可本机编辑。
+
+**保存 ≠ 搬家**。推荐**逐个主题**生效：只扫该主题相关默认月桶与主题桶，**不改写**其它主题桶里已有文件；本主题内不再匹配的文件会退回默认月，或**改派到其它仍匹配的主题**。
+
+| 步骤 | 做什么 |
+|---|---|
+| 1 | `/themes` 改某个主题的 `date_range` / `sources` 等 → **保存** |
+| 2 | 该行点「复制同步命令」→ 先 dry-run，确认后再 `--yes` |
+| 3 | 需要时再改下一个主题并单独同步 |
+
 ```bash
-$EDITOR /Volumes/Storage/_meta/events.yaml
-./scripts/rename_organize.py    # 应用新配置
+# 只同步「香港-深圳」（推荐）
+picvault theme rebucket --theme 香港-深圳          # dry-run
+picvault theme rebucket --theme 香港-深圳 --yes    # apply
+
+# 或：
+./scripts/rename_organize.py --rebucket-themes --theme 香港-深圳 --dry-run
+./scripts/rename_organize.py --rebucket-themes --theme 香港-深圳
+
+# 全量同步所有主题（会覆盖各桶手工调整；慎用）
+picvault theme rebucket --all --yes
 ```
 
-`events.yaml` 支持热改。
+| 改动（对该主题同步后） | 行为 |
+|---|---|
+| **扩大** date_range | 区间覆盖的各默认月桶里新命中的 → **开始月**主题桶 |
+| **缩小** date_range | 该主题桶里不再匹配的 → 按拍摄日所在月的默认月桶 |
+| **改名 / 删主题后全量** | 旧桶在 `--all` 时才会被清扫；单主题同步只碰你点名的主题 |
+
+`date_range` **允许跨月**（如 `2025-12-28`–`2026-01-05`）。主题桶路径固定为 `by-date/<开始年>/<开始月>_<主题名>/`；`month` 可由 `start` 推导（可省略），手写则必须与开始月一致。Web「放回默认月桶」仍按**文件拍摄日**所在月。
+
+`picvault rename` **只处理 inbox**（首次归档仍可按配置进主题桶），**不再**自动全量同步主题。主题桶页「放回默认月桶」仍可做精细纠错。
 
 ### 清理 `_trash/`
 

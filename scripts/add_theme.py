@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -63,22 +64,8 @@ def load_existing_themes(work: Path) -> list:
         return []
 
 
-def append_theme_to_events(work: Path, theme: dict):
-    """Append a single theme entry to events.yaml."""
-    path = work / '_meta' / 'events.yaml'
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Create header if file doesn't exist
-        path.write_text("# Theme definitions for rename_organize.py\n# Each theme: name, month, optional date_range/sources/files\n\nthemes:\n")
-
-    text = path.read_text()
-    if not text.rstrip().endswith('themes:'):
-        # No themes: header yet
-        if not text.endswith('\n'):
-            text += '\n'
-        text += 'themes:\n'
-
-    # Build YAML block
+def _format_theme_yaml_block(theme: dict) -> str:
+    """Format one theme as indented YAML list item lines."""
     lines = [f"  - name: {theme['name']}"]
     lines.append(f"    month: {theme['month']}")
 
@@ -96,10 +83,108 @@ def append_theme_to_events(work: Path, theme: dict):
         for f in theme['files']:
             lines.append(f"      - {f}")
 
-    block = "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n"
 
-    with open(path, 'a') as f:
-        f.write(block)
+
+def _candidate_theme_dict(theme: dict) -> dict:
+    """Map add_theme fields into rename_organize theme shape for normalize/validate."""
+    out = {
+        'name': theme.get('name'),
+        'month': theme.get('month'),
+        'sources': list(theme.get('sources') or []),
+    }
+    if theme.get('files'):
+        out['files'] = list(theme['files'])
+    start = theme.get('date_range_start') or theme.get('start')
+    end = theme.get('date_range_end') or theme.get('end')
+    if start or end:
+        out['date_range'] = {'start': start or '', 'end': end or ''}
+    return out
+
+
+def prepare_theme_for_append(work: Path, theme: dict) -> dict:
+    """Normalize + validate theme (and uniqueness vs existing). Mutates month from start."""
+    import rename_organize as ro
+
+    existing: list = []
+    path = work / '_meta' / 'events.yaml'
+    if path.exists():
+        existing = ro.parse_events_yaml_text(path.read_text(encoding='utf-8'))
+
+    candidate = _candidate_theme_dict(theme)
+    month = str(candidate.get('month') or '').strip()
+    if month and not re.match(r'^\d{4}-\d{2}$', month):
+        raise ValueError(f'month must be YYYY-MM (got {month!r})')
+
+    norm = ro._normalize_theme_dict(candidate)
+    # Keep add_theme write shape in sync with derived month
+    theme = dict(theme)
+    theme['month'] = norm.get('month') or theme.get('month')
+    if theme.get('date_range_start') and theme.get('date_range_end'):
+        theme['date_range_start'] = norm.get('date_range', {}).get('start') or theme['date_range_start']
+        theme['date_range_end'] = norm.get('date_range', {}).get('end') or theme['date_range_end']
+    ro.validate_events_themes(existing + [norm])
+    return theme
+
+
+def append_theme_to_events(work: Path, theme: dict, *, validate: bool = True):
+    """Append a single theme entry to events.yaml.
+
+    Handles fresh init files with ``themes: []`` by rewriting to a block-style
+    list so the result stays valid YAML (plain append after ``[]`` is invalid).
+    """
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Create header if file doesn't exist
+        path.write_text(
+            "# 主题配置（rename_organize / Web /themes）\n"
+            "# 也可用：./scripts/add_theme.py --interactive\n"
+            "#\n"
+            "# 示例（去掉行首 # 后保存；→ by-date/2026/2026-07_海南/）：\n"
+            "#\n"
+            "# themes:\n"
+            "#   - name: 海南\n"
+            "#     month: 2026-07\n"
+            "#     date_range:\n"
+            "#       start: 2026-07-10\n"
+            "#       end: 2026-07-18\n"
+            "#     sources:\n"
+            "#       - iphone\n"
+            "#       - canon\n"
+            "#\n"
+            "# 字段：name、month(YYYY-MM) 必填；date_range / sources / files 至少其一\n"
+            "# 保存后：picvault theme rebucket --theme <名> [--yes]\n"
+            "\n"
+            "themes: []\n"
+        )
+
+    if validate:
+        theme = prepare_theme_for_append(work, theme)
+    text = path.read_text()
+    block = _format_theme_yaml_block(theme)
+
+    # Fresh init / empty flow list: themes: [] → themes:\n  - name: ...
+    empty_flow = re.search(r'(?m)^themes:\s*\[\s*\]\s*$', text)
+    if empty_flow:
+        text = text[: empty_flow.start()] + 'themes:\n' + block + text[empty_flow.end() :]
+        if not text.endswith('\n'):
+            text += '\n'
+        path.write_text(text)
+        return
+
+    # No themes key yet — add header then the item
+    if not re.search(r'(?m)^themes:\s*(?:$|\[)', text):
+        if not text.endswith('\n'):
+            text += '\n'
+        text += 'themes:\n' + block
+        path.write_text(text)
+        return
+
+    # Existing block-style list (or bare `themes:`) — append item
+    if not text.endswith('\n'):
+        text += '\n'
+    path.write_text(text + block)
 
 
 def prompt(question: str, default: str = '') -> str:
@@ -116,8 +201,8 @@ def interactive_add(work: Path) -> dict:
         print("ERROR: theme name is required")
         sys.exit(1)
 
-    month = prompt("Month (YYYY-MM)", "")
-    if not re.match(r'^\d{4}-\d{2}$', month):
+    month = prompt("Month (YYYY-MM, blank if date_range start will derive it)", "")
+    if month and not re.match(r'^\d{4}-\d{2}$', month):
         print("ERROR: month must be YYYY-MM format")
         sys.exit(1)
 
@@ -128,6 +213,14 @@ def interactive_add(work: Path) -> dict:
         sys.exit(1)
     if start and not re.match(r'^\d{4}-\d{2}-\d{2}$', start):
         print("ERROR: dates must be YYYY-MM-DD format")
+        sys.exit(1)
+    if end and not re.match(r'^\d{4}-\d{2}-\d{2}$', end):
+        print("ERROR: dates must be YYYY-MM-DD format")
+        sys.exit(1)
+    if not month and start:
+        month = start[:7]
+    if not month:
+        print("ERROR: month or date_range start is required")
         sys.exit(1)
 
     sources_str = prompt("Source devices (comma-separated, empty=any)", "")
@@ -145,8 +238,6 @@ def interactive_add(work: Path) -> dict:
 
     return theme
 
-
-import re
 
 def main():
     parser = argparse.ArgumentParser(description='Add theme to events.yaml')
@@ -168,17 +259,43 @@ def main():
     if args.interactive:
         theme = interactive_add(work)
     else:
-        if not args.name or not args.month:
-            print("ERROR: --interactive or --name + --month required")
+        if not args.name:
+            print("ERROR: --interactive or --name required", file=sys.stderr)
+            sys.exit(1)
+        if args.month and not re.match(r'^\d{4}-\d{2}$', args.month):
+            print(f"ERROR: --month must be YYYY-MM (got {args.month!r})", file=sys.stderr)
+            sys.exit(1)
+        if (args.start and not args.end) or (args.end and not args.start):
+            print("ERROR: both --start and --end must be provided together", file=sys.stderr)
+            sys.exit(1)
+        month = args.month
+        if not month and args.start:
+            month = args.start[:7] if len(args.start) >= 7 else None
+        if not month:
+            print("ERROR: --month or --start required", file=sys.stderr)
             sys.exit(1)
         theme = {
             'name': args.name,
-            'month': args.month,
+            'month': month,
             'sources': [s.strip() for s in (args.sources or '').split(',') if s.strip()],
         }
         if args.start and args.end:
             theme['date_range_start'] = args.start
             theme['date_range_end'] = args.end
+
+    if not theme.get('date_range_start') and not theme.get('sources') and not theme.get('files'):
+        print(
+            "ERROR: need date_range (--start/--end) and/or --sources "
+            "(name+month alone never matches files)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        theme = prepare_theme_for_append(work, theme)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"\n✓ Appending theme:")
     print(f"  name: {theme['name']}")
@@ -188,9 +305,9 @@ def main():
     if theme.get('sources'):
         print(f"  sources: {theme['sources']}")
 
-    append_theme_to_events(work, theme)
+    append_theme_to_events(work, theme, validate=False)
     print(f"\n✓ Appended to {work}/_meta/events.yaml")
-    print(f"\nNext step: ./rename_organize.py  (apply the new theme)")
+    print(f"\nNext step: picvault theme rebucket --theme {theme['name']} [--yes]")
 
 
 if __name__ == '__main__':

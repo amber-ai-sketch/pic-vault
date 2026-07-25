@@ -72,6 +72,7 @@ mkdir -p "$WORK/by-date"
 mkdir -p "$WORK/screenshots"
 mkdir -p "$WORK/screenrecords"
 mkdir -p "$WORK/docs"
+mkdir -p "$WORK/things"
 mkdir -p "$WORK/_favorite"
 mkdir -p "$WORK/_vlogs"
 mkdir -p "$WORK/_trash"
@@ -88,10 +89,34 @@ if [[ ! -f "$WORK/_meta/events.yaml" ]]; then
         cp "$(dirname "$(readlink -f "$0")")/../outputs/events.example.yaml" "$WORK/_meta/events.yaml"
         echo "✓ Seeded _meta/events.yaml from example (includes sample themes: 海南/夏令营/重要证件照)"
     else
-        # Empty events.yaml with just header
+        # Empty events.yaml with commented example (no live themes)
         cat > "$WORK/_meta/events.yaml" << 'EVENTSEOF'
-# Theme definitions for rename_organize.py
-# Add themes with ./scripts/add_theme.py --interactive
+# 主题配置（rename_organize / Web /themes）
+# 也可用：./scripts/add_theme.py --interactive
+#
+# 示例（复制下面块，去掉每行行首的「# 」后保存；文件夹会变成 by-date/2026/2026-07_海南/）：
+#
+# themes:
+#   - name: 海南
+#     month: 2026-07
+#     date_range:
+#       start: 2026-07-10
+#       end: 2026-07-18
+#     sources:
+#       - iphone
+#       - canon
+#   # 仅来源（当月只有一个主题时，命中 sources 的都进该桶）：
+#   - name: 夏令营
+#     month: 2026-08
+#     sources: [iphone]
+#   # 或显式文件列表（优先级最高）：
+#   # - name: 重要证件照
+#   #   month: 2026-06
+#   #   files:
+#   #     - 20260601_100000_iphone_a3f2.heic
+#
+# 字段：name、month(YYYY-MM) 必填；date_range / sources / files 可选
+# 保存后需再跑 rename，已归档文件才会进主题桶
 
 themes: []
 EVENTSEOF
@@ -100,4 +125,4 @@ EVENTSEOF
 fi
 
 echo "✓ Created directory skeleton in $WORK"
-echo "  inbox/  by-date/  screenshots/  screenrecords/  docs/  _favorite/  _vlogs/  _trash/  _meta/"
+echo "  inbox/  by-date/  screenshots/  screenrecords/  docs/  things/  _favorite/  _vlogs/  _trash/  _meta/"

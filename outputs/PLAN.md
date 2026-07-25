@@ -222,6 +222,9 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 ├── docs/                           # 文档照片（手动移入，不自动分类）
 │   ├── doc_20260715_183022_iphone_a3f2.jpg
 │   └── ...
+├── things/                         # 物品照片/视频（手动移入，不自动分类）
+│   ├── things_20260715_183022_iphone_a3f2.jpg
+│   └── ...
 ├── _favorite/
 │   ├── 2026-07_海南/               # 带主题：来自主题桶 → 同名子目录
 │   ├── 2026-08_夏令营/
@@ -249,6 +252,7 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
     ├── screenshots/                # 镜像：截图
     ├── screenrecords/              # 镜像：录屏
     ├── docs/                       # 镜像：文档
+    ├── things/                     # 镜像：物品
     ├── _favorite/
     └── _vlogs/
 ```
@@ -264,6 +268,7 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
     ├── screenshots/
     ├── screenrecords/
     ├── docs/
+    ├── things/
     ├── _favorite/
     ├── _vlogs/
     ├── _trash/
@@ -280,7 +285,7 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 
 源白名单：`iphone` `samsung` `xiaomi` `huawei` `oppo` `vivo` `oneplus` `google` `canon` `canon-a/b` `nikon` `nikon-a` `sony` `sony-a` `fuji` `fuji-a` `ricoh-gr` `ricoh-gr2` `dji` `dji-nano/action/pocket/osmo` `gopro`
 
-Live Photo（HEIC + MOV）成对处理。截图/录屏分类见下文「截图/录屏检测（v7）」。
+Live Photo（同目录同名 HEIC/JPG + MOV）成对进 `by-date/.../photos/`，共用 stem `<date>_<source>_live_<hash>`（无 source 则为 `<date>_live_<hash>`）；Web 画廊只展示静图。单边仍按普通规则。截图/录屏分类见下文「截图/录屏检测（v7）」。
 
 ## 截图/录屏检测（v7）
 
@@ -309,6 +314,7 @@ Live Photo（HEIC + MOV）成对处理。截图/录屏分类见下文「截图/�
 | screenshot | `screenshots/` | `screenshot_<date>_<source?>_<hash>.ext` |
 | recording | `screenrecords/` | `screenrecorder_<date>_<source?>_<hash>.ext` |
 | docs（仅手动） | `docs/` | `doc_<date>_<source?>_<hash>.ext` |
+| things（仅手动） | `things/` | `things_<date>_<source?>_<hash>.ext` |
 | normal | `by-date/...` | `<date>_<source?>_<hash>.ext` |
 
 ### 命名示例（v7）
@@ -353,7 +359,8 @@ Web 纠错复用同一套 `plan_destination` / `reclassify_paths`：
 - **移至截图录屏**：按后缀图→screenshot、视频→recording（不重跑启发式）
 - **移回普通分类**：force normal
 - **移至文档**：force docs（手机拍的证件/票据等）
-- 工具栏按当前页隐藏「已在目标」按钮（普通页无「移回普通」；截图/录屏页无「移至截图录屏」；文档页无「移至文档」）
+- **移至物品**：force things（物品照片/视频）
+- 工具栏按当前页隐藏「已在目标」按钮（普通页无「移回普通」；截图/录屏页无「移至截图录屏」；文档页无「移至文档」；物品页无「移至物品」）
 
 ### Web 浏览
 
@@ -361,11 +368,12 @@ Web 纠错复用同一套 `plan_destination` / `reclassify_paths`：
 GET  /screenshots           # 截图库
 GET  /screenrecords         # 录屏库
 GET  /docs                  # 文档库
-POST /api/reclassify        # {action: to_screen|to_normal|to_docs, paths:[...]}
+GET  /things                # 物品库
+POST /api/reclassify        # {action: to_screen|to_normal|to_docs|to_things, paths:[...]}
 POST /api/star
 ```
 
-加星：`_meta/stars/screenshots.json` / `screenrecords.json` / `docs.json` / `<月份桶>.json`；重分类时自动迁移星标路径。
+加星：`_meta/stars/screenshots.json` / `screenrecords.json` / `docs.json` / `things.json` / `<月份桶>.json`；重分类时自动迁移星标路径。
 
 ### 精选到 iPhone
 
@@ -433,7 +441,7 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
   --backup /Volumes/WD4T/MediaVault
 ```
 
-`--include` 显式白名单只镜像 `by-date/` `screenshots/` `screenrecords/` `docs/` `_favorite/` `_vlogs/`，**不动 WD4T 其他内容**。
+`--include` 显式白名单只镜像 `by-date/` `screenshots/` `screenrecords/` `docs/` `things/` `_favorite/` `_vlogs/`，**不动 WD4T 其他内容**。
 
 ### 步骤 4：校验
 
@@ -625,7 +633,7 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 
 - 路由：`/` `/y/<year>/<month>` `/screenshots` `/screenrecords` `/themes` `POST /api/star` `POST /api/reclassify` `/raw` `/thumb`
 - 排序默认 `capture`；缩略图懒加载
-- 画廊支持勾选 +「移至截图录屏 / 移回普通分类」
+- 画廊支持勾选 +「移至截图录屏 / 移回普通分类 / 移至文档 / 移至物品」
 - 仅监听 LAN；HEIC 缩略图走 macOS `sips`
 - 启动时校验 `--work` 在白名单内，并确保 `screenrecords/` 存在
 
@@ -659,7 +667,7 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 
 ### 用户防丢数据操作清单
 
-1. 每次 batch → `sync_to_backup.sh --verify`，看到"sha256 一致"才放心
+1. 每次 batch → `sync_to_backup.sh --verify`，看到"size/mtime match"才放心
 2. **绝不**手动清空工作盘前不跑 sync
 3. SD 卡格式化前确认归档已同步到 WD4T
 4. 每月一次 `diskutil info /Volumes/WD4T`
@@ -677,11 +685,12 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 # 3. 去重
 ./scripts/dedupe.py
 
-# 4. 重命名归档
-./scripts/rename_organize.py --apply-events _meta/events.yaml
+# 4. 重命名归档（仅 inbox；主题同步见下一步）
+./scripts/rename_organize.py
 
-# 5. 添加主题（按需）
+# 5. 添加主题（按需）并按主题同步 by-date
 ./scripts/add_theme.py --interactive
+./scripts/rename_organize.py --rebucket-themes --theme <主题名>
 
 # 6. Web 浏览 + 加星
 ./scripts/web_browse.py --host 0.0.0.0 --port 8765 &
@@ -725,8 +734,9 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 | 文件名关键字 | 图：`screenshot`；视频：`record`（子串）|
 | 命名 | 截图 `screenshot_…`；录屏 `screenrecorder_…`；普通仍无日期模板 |
 | 录屏视频 | 进 `screenrecords/`（与截图分桶）|
-| Web 纠错 | 按页显示：移至截图录屏 / 移回普通分类 / 移至文档（隐藏当前桶对应按钮）|
+| Web 纠错 | 按页显示：移至截图录屏 / 移回普通分类 / 移至文档 / 移至物品（隐藏当前桶对应按钮）|
 | 文档桶 | `docs/`，仅手动移入；命名 `doc_…` |
+| 物品桶 | `things/`，仅手动移入；命名 `things_…` |
 | 精选目录 | `_favorite/` |
 | 精选子目录结构 | 带主题 → 同名子目录；无主题 → 平铺根 |
 | 带主题精选相簿名 | = 主题名（如 `"2026-07_海南"`） |
@@ -767,7 +777,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 - `web_browse.py`：`/screenshots` `/screenrecords` `/api/reclassify` 可用
 - `add_theme.py --interactive`：5 主题正确追加
 - `onboard_migrate.sh`：检测 `_pre_migration_backup/` 存在；stage 到 `working/inbox/`；`_pre_migration_backup/` 内容不变（sha256 一致）
-- `sync_to_backup.sh`：sha256 一致；白名单含 `screenrecords/`；WD4T 上 `garbage.txt`（root）不被 sync 改动
+- `sync_to_backup.sh`：size/mtime 一致；白名单含 `screenrecords/`；WD4T 上 `garbage.txt`（root）不被 sync 改动
 - `web_browse.py`：核心路由 200
 - `pick_to_iphone.py --bucket 2026-07_海南`：复制到 `_favorite/2026-07_海南/`，`.scpt` 中 `albumName = "2026-07_海南"`
 - `pick_to_iphone.py --bucket 2026-08`：复制到 `_favorite/` 平铺，`.scpt` 中 `albumName = "Picks"`

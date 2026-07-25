@@ -2,7 +2,7 @@
 # sync_to_backup.sh - rsync working disk to backup disk.
 #
 # Default mode: append-only mirror (no --delete on 4T).
-# Use --verify for checksum-based verification.
+# Use --verify for size/mtime verification (no full checksum).
 # Use --prune --confirm to remove orphans from backup (DANGEROUS).
 #
 # Usage:
@@ -51,16 +51,52 @@ USAGE
     esac
 done
 
-# Sandbox: backup must be under WD4T or YM
-case "$BACKUP" in
-    /Volumes/WD4T/MediaVault|/Volumes/WD4T/MediaVault/*) ;;
-    /Volumes/YM/MediaVault|/Volumes/YM/MediaVault/*) ;;
-    *)
+# Canonicalize (resolve .. and symlinks) before whitelist checks.
+# Align work roots with Python validators (dedupe/rename ALLOWED_WORK_PREFIXES).
+_canonicalize() {
+    python3 -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"
+}
+
+_under_prefix() {
+    local path="$1"
+    local prefix="$2"
+    [[ "$path" == "$prefix" || "$path" == "$prefix"/* ]]
+}
+
+if [ "${DUPEGURU_TEST:-}" = "1" ]; then
+    : # skip sandbox in test mode
+else
+    WORK="$(_canonicalize "$WORK")"
+    BACKUP="$(_canonicalize "$BACKUP")"
+
+    WORK_OK=0
+    for prefix in /Volumes/Storage /Volumes/YM/MediaVault; do
+        prefix_r="$(_canonicalize "$prefix" 2>/dev/null || echo "$prefix")"
+        if _under_prefix "$WORK" "$prefix_r"; then
+            WORK_OK=1
+            break
+        fi
+    done
+    if [[ "$WORK_OK" -ne 1 ]]; then
+        echo "ERROR: --work $WORK is not in path whitelist" >&2
+        echo "  Allowed: /Volumes/Storage, /Volumes/YM/MediaVault" >&2
+        exit 1
+    fi
+
+    BACKUP_OK=0
+    for prefix in /Volumes/WD4T/MediaVault /Volumes/YM/MediaVault; do
+        prefix_r="$(_canonicalize "$prefix" 2>/dev/null || echo "$prefix")"
+        if _under_prefix "$BACKUP" "$prefix_r"; then
+            BACKUP_OK=1
+            break
+        fi
+    done
+    if [[ "$BACKUP_OK" -ne 1 ]]; then
         echo "ERROR: --backup $BACKUP is not in path whitelist" >&2
         echo "  Allowed: /Volumes/WD4T/MediaVault, /Volumes/YM/MediaVault" >&2
         exit 1
-        ;;
-esac
+    fi
+fi
 
 # Sanity checks
 [[ -d "$WORK" ]] || { echo "ERROR: $WORK not found" >&2; exit 1; }
@@ -74,6 +110,7 @@ RSYNC_ARGS=(
     --include='screenshots/***'
     --include='screenrecords/***'
     --include='docs/***'
+    --include='things/***'
     --include='_favorite/***'
     --include='_vlogs/***'
     --exclude='*'
@@ -99,18 +136,18 @@ fi
 
 # Mirror
 echo "→ Mirroring $WORK -> $BACKUP"
-echo "  Including: by-date/, screenshots/, screenrecords/, docs/, _favorite/, _vlogs/"
+echo "  Including: by-date/, screenshots/, screenrecords/, docs/, things/, _favorite/, _vlogs/"
 rsync "${RSYNC_ARGS[@]}" "$WORK/" "$BACKUP/" || {
     echo "ERROR: rsync failed" >&2
     exit 1
 }
 
-# Optional verify (skip when --dry-run: nothing was written, checksum would
-# scan the whole library for minutes/hours and always report "differences")
+# Optional verify (skip when --dry-run: nothing was written, size/mtime compare
+# against an unchanged backup is meaningless)
 if [[ "$VERIFY" == "verify" ]]; then
     if [[ -n "$DRY_RUN" ]]; then
         echo ""
-        echo "→ Skipping verify under --dry-run (no files written; checksum compare is meaningless and very slow)."
+        echo "→ Skipping verify under --dry-run (no files written; size/mtime compare is meaningless)."
         echo "  Dry-run preview above is the source of truth. Use Apply (without --dry-run) for real sync + verify."
     else
         echo ""
@@ -121,16 +158,19 @@ if [[ "$VERIFY" == "verify" ]]; then
         rsync -avhn --itemize-changes \
               --include='by-date/***' --include='screenshots/***' \
               --include='screenrecords/***' --include='docs/***' \
+              --include='things/***' \
               --include='_favorite/***' --include='_vlogs/***' --exclude='*' \
               "$WORK/" "$BACKUP/" > "$VERIFY_LOG" 2>&1 || true
-        if grep -E '^[<>ch.*][fLDS]' "$VERIFY_LOG" >/dev/null 2>&1 || \
+        # Itemize 2nd char: f=file d=directory L=symlink D=device S=special.
+        # Must include lowercase d so missing dirs (e.g. cd+++++++++) fail verify.
+        if grep -E '^[<>ch.*][fdLDS]' "$VERIFY_LOG" >/dev/null 2>&1 || \
            grep -E '^\*deleting' "$VERIFY_LOG" >/dev/null 2>&1; then
             echo "⚠️  Differences detected:"
-            grep -E '^[<>ch.*][fLDS]|^\*deleting' "$VERIFY_LOG" | head -30
+            grep -E '^[<>ch.*][fdLDS]|^\*deleting' "$VERIFY_LOG" | head -30
             echo "Full log: $VERIFY_LOG"
             exit 1
         else
-            echo "✓ Verification passed: no pending file differences"
+            echo "✓ Verification passed: size/mtime match (no pending file/directory differences)"
             rm -f "$VERIFY_LOG"
         fi
     fi

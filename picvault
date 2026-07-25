@@ -10,9 +10,15 @@ set -e
 # ============================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
-WORK="${WORK:-${PICVAULT_WORK:-/Volumes/Storage}}"
+# Explicit WORK / PICVAULT_WORK wins; else config file; else default.
 CONFIG_FILE="${PICVAULT_CONFIG:-$HOME/.config/picvault/work}"
-[ -f "$CONFIG_FILE" ] && WORK="$(cat "$CONFIG_FILE")"
+if [ -n "${WORK:-}" ] || [ -n "${PICVAULT_WORK:-}" ]; then
+    WORK="${WORK:-$PICVAULT_WORK}"
+elif [ -f "$CONFIG_FILE" ]; then
+    WORK="$(cat "$CONFIG_FILE")"
+else
+    WORK="/Volumes/Storage"
+fi
 
 # Path whitelist (sandbox)
 ALLOWED_PREFIXES=(
@@ -48,21 +54,57 @@ info()  { echo -e "${BLUE}ℹ${NC}  $*" >&2; }
 # ============================================================
 # Path sandbox
 # ============================================================
+_canonicalize() {
+    python3 -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"
+}
+
 check_path() {
     local p="$1"
     local kind="$2"
     [ "${PICVAULT_SANDBOX_BYPASS:-0}" = "1" ] && return 0
+    # Resolve .. / symlinks before prefix match (blocks /Volumes/Storage/../../Users/...)
+    local resolved
+    if ! resolved="$(_canonicalize "$p")"; then
+        err "--$kind $p could not be resolved"
+        exit 1
+    fi
+    local prefix prefix_r
     for prefix in "${ALLOWED_PREFIXES[@]}"; do
-        if [[ "$p" == "$prefix" || "$p" == "$prefix"/* ]]; then
+        prefix_r="$(_canonicalize "$prefix" 2>/dev/null || echo "$prefix")"
+        if [[ "$resolved" == "$prefix_r" || "$resolved" == "$prefix_r"/* ]]; then
+            # Update caller’s path to canonical form when checking WORK
+            if [[ "$kind" == "work" ]]; then
+                WORK="$resolved"
+            fi
             return 0
         fi
     done
-    err "--$kind $p is not in path whitelist"
+    err "--$kind $p is not in path whitelist (resolved: $resolved)"
     err "  Allowed: ${ALLOWED_PREFIXES[*]}"
     exit 1
 }
 
-check_path "$WORK" "work"
+sanitize_bucket() {
+    local bucket="$1"
+    if [[ -z "$bucket" || "$bucket" == "." || "$bucket" == ".." ]]; then
+        err "invalid bucket: ${bucket:-<empty>}"
+        return 1
+    fi
+    if [[ "$bucket" == *"/"* || "$bucket" == *"\\"* || "$bucket" == *".."* ]]; then
+        err "invalid bucket (no path separators or '..'): $bucket"
+        return 1
+    fi
+    return 0
+}
+
+# Path check is deferred for commands that do not need a work disk
+# (help / doctor). Others still sandbox WORK after global --work parsing.
+_needs_work_check() {
+    case "${1:-}" in
+        help|-h|--help|doctor) return 1 ;;
+        *) return 0 ;;
+    esac
+}
 
 # ============================================================
 # Helpers
@@ -110,9 +152,9 @@ Status:
 Main pipeline:
   init [--with-example-themes]   Initialize work directory structure
   dedupe [--yes]                 Find duplicates, move to _trash/
-  rename [--yes]                 Rename + organize (default dry-run)
+  rename [--yes]                 Rename/organize inbox only (dry-run default)
   sync [--verify] [--yes]        Mirror work → backup disk
-  pipeline [--yes]               dedupe + rename + sync in one go
+  pipeline [--yes]               dedupe + rename + sync --verify in one go
 
 Web UI:
   web start [--port 8765]       Start the Flask-free web browser (background)
@@ -130,6 +172,9 @@ Themes:
   theme add                     Interactively add a theme to events.yaml
   theme list                    List themes
   theme remove <name>           Remove a theme
+  theme rebucket --theme NAME [--yes]
+                                Sync one theme both ways (dry-run default)
+  theme rebucket --all [--yes]  Sync ALL themes (may overwrite manual moves)
 
 Tools:
   find <pattern>                Search filenames in by-date/
@@ -219,13 +264,14 @@ cmd_rename() {
 cmd_sync() {
     local verify=""
     local yes=""
+    local backup="${BACKUP:-${PICVAULT_BACKUP:-/Volumes/WD4T/MediaVault}}"
     [ "$1" = "--verify" ] && { verify="--verify"; shift; }
     [ "$1" = "--yes" ] && yes="--yes"
     if [ -z "$yes" ]; then
         warn "Running in dry-run mode. Use --yes to actually sync."
-        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "/Volumes/WD4T/MediaVault" --dry-run
+        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "$backup" --dry-run
     else
-        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "/Volumes/WD4T/MediaVault" $verify
+        bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "$backup" $verify
     fi
 }
 
@@ -236,7 +282,12 @@ cmd_pipeline() {
     info "Starting full pipeline..."
     cmd_dedupe $yes
     cmd_rename $yes
-    cmd_sync $yes
+    # Align with dashboard sync_apply: always verify on real sync; fail pipeline if verify fails
+    if [ -n "$yes" ]; then
+        cmd_sync --verify --yes
+    else
+        cmd_sync
+    fi
     ok "Pipeline complete"
 }
 
@@ -266,7 +317,7 @@ cmd_web() {
                 return
             fi
             nohup python3 "$SCRIPTS_DIR/web_browse.py" \
-                --work "$WORK" --host 0.0.0.0 --port "$port" \
+                --work "$WORK" --host 127.0.0.1 --port "$port" \
                 > "$log_file" 2>&1 &
             echo $! > "$pid_file"
             sleep 1
@@ -332,6 +383,7 @@ cmd_star() {
         err "Usage: picvault star <bucket> <file>"
         return 1
     fi
+    sanitize_bucket "$bucket" || return 1
     local stars_file="$WORK/_meta/stars/${bucket}.json"
     mkdir -p "$(dirname "$stars_file")"
     if [ ! -f "$stars_file" ]; then
@@ -354,6 +406,7 @@ cmd_unstar() {
         err "Usage: picvault unstar <bucket> <file>"
         return 1
     fi
+    sanitize_bucket "$bucket" || return 1
     local stars_file="$WORK/_meta/stars/${bucket}.json"
     [ -f "$stars_file" ] || { warn "No stars for $bucket"; return; }
     python3 -c "
@@ -425,9 +478,53 @@ data['themes'] = [t for t in data.get('themes', []) if t.get('name') != n]
 with open(p, 'w') as f: yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
 " "$events" "$name"
             ok "Removed theme: $name"
+            info "Config only — files in by-date/*_${name}/ stay until you sync:"
+            info "  picvault theme rebucket --theme ${name} [--yes]   # orphan bucket → default month"
+            info "  or: picvault theme rebucket --all [--yes]"
+            ;;
+        rebucket)
+            local yes="" all="" themes=()
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --yes) yes=1; shift ;;
+                    --all) all=1; shift ;;
+                    --theme)
+                        shift
+                        [ -z "${1:-}" ] && { err "Usage: picvault theme rebucket --theme <name> [--yes]"; return 1; }
+                        themes+=("$1"); shift ;;
+                    *)
+                        err "Unknown arg: $1"
+                        err "Usage: picvault theme rebucket --theme <name> [--yes]  OR  --all [--yes]"
+                        return 1 ;;
+                esac
+            done
+            if [ -z "$all" ] && [ ${#themes[@]} -eq 0 ]; then
+                err "Specify --theme <name> and/or --all"
+                err "  One theme:  picvault theme rebucket --theme 香港-深圳 [--yes]"
+                err "  All themes: picvault theme rebucket --all [--yes]  (may overwrite manual moves)"
+                return 1
+            fi
+            local args=(--work "$WORK" --rebucket-themes)
+            if [ -n "$all" ]; then
+                args+=(--all)
+            fi
+            for t in "${themes[@]}"; do
+                args+=(--theme "$t")
+            done
+            if [ -n "$yes" ]; then
+                python3 "$SCRIPTS_DIR/rename_organize.py" "${args[@]}"
+            else
+                python3 "$SCRIPTS_DIR/rename_organize.py" "${args[@]}" --dry-run
+                echo ""
+                if [ -n "$all" ]; then
+                    info "Dry-run only. Re-run: picvault theme rebucket --all --yes"
+                else
+                    info "Dry-run only. Re-run with --yes to apply (same --theme flags)"
+                fi
+            fi
             ;;
         *)
-            err "Usage: picvault theme {add|list|remove <name>}"
+            err "Usage: picvault theme {add|list|remove <name>|rebucket --theme <name>|rebucket --all} [--yes]"
             ;;
     esac
 }
@@ -535,14 +632,58 @@ cmd_doctor() {
 
 # === main ===
 main() {
+    # Global options: picvault [--work PATH] <command> ...
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --work)
+                if [ -z "${2:-}" ]; then
+                    err "--work requires a path"
+                    return 1
+                fi
+                WORK="$2"
+                shift 2
+                ;;
+            --help|-h)
+                cmd_help
+                return 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                err "Unknown global option: $1"
+                err "  Global options: --work PATH"
+                err "  Usage: picvault [--work PATH] <command> ..."
+                return 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
     if [ $# -eq 0 ]; then
         cmd_help
         return
     fi
-    
+
     local cmd="$1"
     shift
-    
+
+    # Reject --work after the command (do not silently ignore) — before disk checks
+    local a
+    for a in "$@"; do
+        if [ "$a" = "--work" ]; then
+            err "--work must come before the command: picvault --work PATH $cmd ..."
+            return 1
+        fi
+    done
+
+    if _needs_work_check "$cmd"; then
+        check_path "$WORK" "work"
+    fi
+
     case "$cmd" in
         help|-h|--help)
             cmd_help

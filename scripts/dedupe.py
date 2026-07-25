@@ -48,6 +48,25 @@ def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
     )
 
 
+def validate_batch_name(batch: str) -> str:
+    """Reject path separators and '..' so inbox/_trash joins cannot escape."""
+    if not batch:
+        raise ValueError("--batch must be a non-empty name")
+    if batch in ('.', '..') or '..' in batch:
+        raise ValueError(f"--batch {batch!r} must not contain '..'")
+    if '/' in batch or '\\' in batch or os.sep in batch:
+        raise ValueError(f"--batch {batch!r} must not contain path separators")
+    return batch
+
+
+def _ensure_under(root: Path, path: Path, kind: str) -> Path:
+    root_r = root.resolve()
+    path_r = path.resolve()
+    if path_r != root_r and not str(path_r).startswith(str(root_r) + os.sep):
+        raise ValueError(f"{kind} path escapes sandbox: {path}")
+    return path_r
+
+
 def sha256_file(path: Path) -> str:
     """SHA-256 of file contents (streaming)."""
     h = hashlib.sha256()
@@ -63,7 +82,8 @@ def scan_files(work: Path, batch: "Optional[str]") -> list[Path]:
     if not inbox.exists():
         return []
     if batch:
-        target = inbox / batch
+        validate_batch_name(batch)
+        target = _ensure_under(inbox, inbox / batch, 'batch')
         if not target.exists():
             return []
         return [f for f in target.rglob('*') if f.is_file()]
@@ -95,10 +115,12 @@ def pick_keep(dupes: list[Path]) -> Path:
 
 def move_to_trash(work: Path, file: Path, batch: str) -> Path:
     """Move duplicate to _trash/<batch>/<relative path>."""
-    trash_root = work / '_trash' / batch
+    validate_batch_name(batch)
+    trash = work / '_trash'
+    trash_root = _ensure_under(trash, trash / batch, 'trash batch')
     # Preserve original path structure inside trash
     rel = file.relative_to(work / 'inbox')
-    dest = trash_root / rel
+    dest = _ensure_under(trash, trash_root / rel, 'trash dest')
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(file), str(dest))
     return dest
@@ -117,11 +139,19 @@ def main():
     # Sandbox check
     try:
         work = validate_path(args.work, ALLOWED_WORK_PREFIXES, 'work')
+        if args.batch is not None:
+            validate_batch_name(args.batch)
+            _ensure_under(work / 'inbox', work / 'inbox' / args.batch, 'batch')
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
     batch = args.batch or datetime.now().strftime('%Y-%m-%d')
+    try:
+        validate_batch_name(batch)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"→ Scanning {work}/inbox/{args.batch or ''}", flush=True)
     files = scan_files(work, args.batch)

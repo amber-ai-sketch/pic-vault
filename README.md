@@ -45,6 +45,7 @@ open outputs/dashboard.html
 │  ├── screenshots/    ← screenshots (images)      │
 │  ├── screenrecords/  ← screen recordings (video) │
 │  ├── docs/           ← document photos (manual)  │
+│  ├── things/         ← object photos (manual)    │
 │  ├── _favorite/      ← starred items             │
 │  ├── _vlogs/         ← edited videos             │
 │  ├── _trash/         ← dedup'd (30-day retain)   │
@@ -58,7 +59,7 @@ open outputs/dashboard.html
 ┌─────────────────────────────────────────────────┐
 │  /Volumes/WD4T/MediaVault/  (Backup disk, 4T)    │
 │  Mirror: by-date/ + screenshots/ + screenrecords/│
-│          + docs/ + _favorite/ + _vlogs/          │
+│          + docs/ + things/ + _favorite/ + _vlogs/│
 └─────────────────────────────────────────────────┘
 ```
 

@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -125,6 +125,8 @@ def is_camera_filename(path: Path) -> bool:
     return bool(CAMERA_FILENAME_REGEX.match(path.name))
 
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.hevc', '.webm'}
+LIVE_STILL_EXTS = {'.heic', '.jpg', '.jpeg'}
+LIVE_MOTION_EXT = '.mov'
 IMAGE_EXTS = {'.jpg', '.jpeg', '.heic', '.png', '.webp',
               '.raw', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2'}
 
@@ -351,18 +353,21 @@ def _normalize_source(name: str) -> str:
     """Normalize unknown Make/Model into a safe source segment.
 
     - Lowercase
-    - Replace spaces and dots with dashes
-    - Strip trailing junk
+    - Replace spaces, dots, slashes with dashes
+    - Keep only [a-z0-9-]
     Examples:
       "Insta360"     -> "insta360"
       "AKASO TECH"   -> "akaso-tech"
       "GoPro, Inc."  -> "gopro-inc"
+      "Evil/Corp"    -> "evil-corp"
     """
     import re as _re
     s = name.strip().lower()
+    s = _re.sub(r'[/\\]+', '-', s)
     s = _re.sub(r'[\s._,]+', '-', s)
+    s = _re.sub(r'[^a-z0-9\-]+', '', s)
     s = s.strip('-')
-    return s or "unknown"
+    return s or 'unknown'
 
 
 # === Capture classification (v7) ===
@@ -431,11 +436,238 @@ def star_bucket_for_rel(rel: str) -> str:
     parts = Path(rel).parts
     if not parts:
         return 'unknown'
-    if parts[0] in ('screenshots', 'screenrecords', 'docs'):
+    if parts[0] in ('screenshots', 'screenrecords', 'docs', 'things'):
         return parts[0]
     if parts[0] == 'by-date' and len(parts) >= 3:
         return parts[2]
     return parts[0]
+
+
+def _exif_make_str(exif: dict) -> str:
+    if not exif:
+        return ''
+    make = exif.get(0x010f, b'')
+    if isinstance(make, bytes):
+        make = make.decode('utf-8', 'ignore')
+    return str(make or '').strip()
+
+
+def is_live_still_eligible(path: Path, exif: dict = None) -> bool:
+    """Still half of a Live Photo: camera filename or Apple/iPhone Make."""
+    if path.suffix.lower() not in LIVE_STILL_EXTS:
+        return False
+    if is_camera_filename(path):
+        return True
+    if exif is None:
+        exif = read_exif(path)
+    make = _exif_make_str(exif).lower()
+    return 'apple' in make or 'iphone' in make
+
+
+def _pick_live_still(stills: list[Path]) -> Optional[Path]:
+    """Prefer HEIC; require is_live_still_eligible."""
+    stills = sorted(
+        stills,
+        key=lambda p: (0 if p.suffix.lower() == '.heic' else 1, p.name),
+    )
+    for still in stills:
+        try:
+            if is_live_still_eligible(still):
+                return still
+        except Exception:
+            continue
+    return None
+
+
+def find_live_photo_pairs(files: list[Path]) -> dict:
+    """Map still Path -> motion .mov Path for Live Photo pairs in inbox.
+
+    1) Same-folder: parent + stem (case-insensitive).
+    2) Cross-folder: among leftovers, unique stem with exactly one eligible
+       still and one .mov anywhere under inbox (reunites stock splits).
+       Ambiguous stems (2+ stills or 2+ movs) are skipped with a warning.
+    """
+    by_parent_stem = {}  # (parent, stem) -> {'stills','movs'}
+    by_stem = {}  # stem -> {'stills','movs'}
+    for f in files:
+        if not f.is_file():
+            continue
+        stem = f.stem.lower()
+        parent = str(f.parent.resolve())
+        ext = f.suffix.lower()
+        if ext not in LIVE_STILL_EXTS and ext != LIVE_MOTION_EXT:
+            continue
+        g1 = by_parent_stem.setdefault((parent, stem), {'stills': [], 'movs': []})
+        g2 = by_stem.setdefault(stem, {'stills': [], 'movs': []})
+        if ext == LIVE_MOTION_EXT:
+            g1['movs'].append(f)
+            g2['movs'].append(f)
+        else:
+            g1['stills'].append(f)
+            g2['stills'].append(f)
+
+    pairs = {}
+    used = set()
+
+    # Pass 1: same directory
+    for g in by_parent_stem.values():
+        if not g['movs'] or not g['stills']:
+            continue
+        still = _pick_live_still(g['stills'])
+        if still is None:
+            continue
+        mov = sorted(g['movs'], key=lambda p: p.name)[0]
+        if still in used or mov in used:
+            continue
+        pairs[still] = mov
+        used.add(still)
+        used.add(mov)
+
+    # Pass 2: cross-folder unique stem (stock often splits HEIC/MOV into dirs)
+    for stem, g in sorted(by_stem.items()):
+        stills = [p for p in g['stills'] if p not in used]
+        movs = [p for p in g['movs'] if p not in used]
+        if not stills or not movs:
+            continue
+        eligible = []
+        for s in stills:
+            try:
+                if is_live_still_eligible(s):
+                    eligible.append(s)
+            except Exception:
+                continue
+        if not eligible:
+            continue
+        if len(eligible) != 1 or len(movs) != 1:
+            print(
+                f"  [warn] ambiguous Live Photo stem {stem!r}: "
+                f"{len(eligible)} still(s), {len(movs)} mov(s) — skip cross-folder pair",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        still = _pick_live_still(eligible) or eligible[0]
+        mov = movs[0]
+        # Skip if already same-folder (handled); here parents differ or leftover
+        if still.parent.resolve() == mov.parent.resolve():
+            continue
+        # Require close mtimes so unrelated batches with the same stem
+        # (e.g. IMG_0001) are not paired across folders.
+        try:
+            dt = abs(still.stat().st_mtime - mov.stat().st_mtime)
+        except OSError:
+            continue
+        if dt > 5.0:
+            print(
+                f"  [warn] cross-folder Live stem {stem!r}: "
+                f"mtime delta {dt:.1f}s > 5s — skip pair",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        pairs[still] = mov
+        used.add(still)
+        used.add(mov)
+
+    return pairs
+
+
+def _theme_bucket_parts(date: str, theme: Optional[dict]) -> tuple:
+    """Return (year, month_dir_name) under by-date/.
+
+    Theme buckets use theme.month (start month), not the file's capture month.
+    """
+    if theme:
+        tm = str(theme.get('month') or '').strip()
+        theme_name = (theme.get('name') or '').strip()
+        if _THEME_MONTH_RE.match(tm):
+            safe = theme_name.replace('/', '_').replace('\\', '_').replace('..', '_')
+            if theme_name:
+                return tm[:4], f'{tm}_{safe}'
+            return tm[:4], tm
+    if not date or len(date) < 6:
+        return '', ''
+    y, m = date[:4], date[4:6]
+    return y, f'{y}-{m}'
+
+
+def _month_dir_name(date: str, theme: Optional[dict]) -> str:
+    _year, month_dir = _theme_bucket_parts(date, theme)
+    return month_dir
+
+
+def unique_live_pair_dests(dest_dir: Path, stem: str, still_ext: str) -> tuple:
+    """Pick unused stem for still+mov pair (bumps _N if either exists)."""
+    n = 0
+    while True:
+        s = stem if n == 0 else f"{stem}_{n}"
+        still_p = dest_dir / f"{s}{still_ext}"
+        mov_p = dest_dir / f"{s}{LIVE_MOTION_EXT}"
+        if not still_p.exists() and not mov_p.exists():
+            return still_p, mov_p
+        n += 1
+
+
+def live_companion_of(path: Path) -> Optional[Path]:
+    """Same-dir Live Photo companion: still ↔ .mov with the same stem."""
+    if not path.is_file():
+        return None
+    ext = path.suffix.lower()
+    stem_l = path.stem.lower()
+    parent = path.parent
+    if ext == LIVE_MOTION_EXT:
+        want = LIVE_STILL_EXTS
+    elif ext in LIVE_STILL_EXTS:
+        want = {LIVE_MOTION_EXT}
+    else:
+        return None
+    try:
+        candidates = list(parent.iterdir())
+    except OSError:
+        return None
+    for p in candidates:
+        if not p.is_file() or p.resolve() == path.resolve():
+            continue
+        if p.suffix.lower() in want and p.stem.lower() == stem_l:
+            return p
+    return None
+
+
+def unique_pair_dests(dest_dir: Path, stem: str, ext1: str, ext2: str) -> tuple:
+    """Pick unused shared stem for two companion files (bumps _N if either exists)."""
+    n = 0
+    while True:
+        s = stem if n == 0 else f"{stem}_{n}"
+        p1 = dest_dir / f"{s}{ext1}"
+        p2 = dest_dir / f"{s}{ext2}"
+        if not p1.exists() and not p2.exists():
+            return p1, p2
+        n += 1
+
+
+def plan_live_pair(work: Path, still: Path, mov: Path,
+                   events: list = None, cli_source: Optional[str] = None) -> tuple:
+    """Plan destinations for a Live Photo pair (both under photos/).
+
+    Returns (still_dest, mov_dest, stem_name_without_ext).
+    Stem: <date>_<source>_live_<hash> or <date>_live_<hash>.
+    Hash is from the still image bytes.
+    """
+    events = events if events is not None else []
+    exif = read_exif(still)
+    date = get_date(still, exif)
+    source = get_source(still, exif, {}, cli_source)
+    h = sha256_short(still)
+    if source:
+        stem = f"{date}_{source}_live_{h}"
+    else:
+        stem = f"{date}_live_{h}"
+
+    theme = match_theme(still, date, source, events)
+    year, month_dir = _theme_bucket_parts(date, theme)
+    dest_dir = work / 'by-date' / year / month_dir / 'photos'
+    still_ext = still.suffix.lower()
+    return unique_live_pair_dests(dest_dir, stem, still_ext) + (stem,)
 
 
 def compute_dest(work: Path, src: Path, capture_type: str,
@@ -443,7 +675,7 @@ def compute_dest(work: Path, src: Path, capture_type: str,
                  exif: dict = None, video_tags: dict = None) -> tuple:
     """Compute (dest_path, new_name, capture_type) for a file.
 
-    Does not move. ``capture_type``: screenshot|recording|docs|normal.
+    Does not move. ``capture_type``: screenshot|recording|docs|things|normal.
     """
     events = events if events is not None else []
     if exif is None:
@@ -466,19 +698,13 @@ def compute_dest(work: Path, src: Path, capture_type: str,
     elif capture_type == 'docs':
         dest_dir = work / 'docs'
         new_name = f"doc_{date}_{source_part}{h}{ext}"
+    elif capture_type == 'things':
+        dest_dir = work / 'things'
+        new_name = f"things_{date}_{source_part}{h}{ext}"
     else:
         theme = match_theme(src, date, source, events)
-        year = date[:4]
-        month = date[:6]
+        year, month_dir_name = _theme_bucket_parts(date, theme)
         bucket_type = 'videos' if is_video(src) else 'photos'
-        if theme:
-            theme_name = theme.get('name', '').strip()
-            if theme_name:
-                month_dir_name = f"{month[:4]}-{month[4:]}_{theme_name}"
-            else:
-                month_dir_name = f"{month[:4]}-{month[4:]}"
-        else:
-            month_dir_name = f"{month[:4]}-{month[4:]}"
         dest_dir = work / 'by-date' / year / month_dir_name / bucket_type
         new_name = f"{date}_{source_part}{h}{ext}"
 
@@ -490,13 +716,13 @@ def plan_destination(work: Path, path: Path, force_type: Optional[str] = None,
                      events: list = None, cli_source: Optional[str] = None,
                      screenshot_keywords: list = None,
                      recording_keywords: list = None) -> tuple:
-    """Plan dest for path. force_type: None | screenshot | recording | docs | normal.
+    """Plan dest for path. force_type: None | screenshot | recording | docs | things | normal.
 
     Returns (dest_path, capture_type, new_name).
     """
     exif = read_exif(path)
     video_tags = read_video_metadata(path) if is_video(path) else {}
-    if force_type in ('screenshot', 'recording', 'docs', 'normal'):
+    if force_type in ('screenshot', 'recording', 'docs', 'things', 'normal'):
         capture_type = force_type
     else:
         capture_type = classify_capture(
@@ -514,21 +740,40 @@ def plan_destination(work: Path, path: Path, force_type: Optional[str] = None,
 
 def reclassify_paths(work: Path, paths: list, action: str,
                      dry_run: bool = False, events: list = None) -> list:
-    """Reclassify files. action: 'to_screen' | 'to_normal' | 'to_docs'.
+    """Reclassify files. action: 'to_screen' | 'to_normal' | 'to_docs' | 'to_things'.
 
     to_screen: image → screenshot, video → recording (by suffix).
     to_normal: force normal (by-date naming).
     to_docs: force docs/ (manual document photos).
+    to_things: force things/ (manual object photos).
+
+    Live Photo pairs (same-dir still ↔ .mov) move together with a shared stem.
+    For to_screen, the still leads so the companion .mov follows into screenshots/
+    (not screenrecords/ alone).
     """
-    if action not in ('to_screen', 'to_normal', 'to_docs'):
+    if action not in ('to_screen', 'to_normal', 'to_docs', 'to_things'):
         raise ValueError(f'unknown action: {action}')
     events = events if events is not None else load_events(work, None)
     results = []
     work_res = work.resolve()
 
+    # Normalize + dedupe input paths; track which will be handled as companions.
+    normalized = []
+    path_set = set()
     for rel in paths:
         rel = str(rel).lstrip('/')
+        if rel in path_set:
+            continue
+        path_set.add(rel)
+        normalized.append(rel)
+
+    handled = set()  # resolved Paths already moved/skipped as part of a pair
+
+    for rel in normalized:
         src = (work / rel).resolve()
+        if src in handled:
+            continue
+
         item = {'ok': False, 'src': rel, 'dest': None, 'capture_type': None}
         try:
             if not str(src).startswith(str(work_res) + os.sep) and src != work_res:
@@ -540,33 +785,273 @@ def reclassify_paths(work: Path, paths: list, action: str,
                 results.append(item)
                 continue
 
+            companion = live_companion_of(src)
+            lead = src
+            follower = companion
+            # Prefer still as lead when classifying to_screen, or when both halves
+            # were requested (avoid splitting mov → screenrecords alone).
+            if companion is not None:
+                src_is_mov = src.suffix.lower() == LIVE_MOTION_EXT
+                comp_is_still = companion.suffix.lower() in LIVE_STILL_EXTS
+                try:
+                    comp_rel = str(companion.resolve().relative_to(work_res))
+                except ValueError:
+                    comp_rel = None
+                both_requested = bool(comp_rel and comp_rel in path_set)
+                if (src_is_mov and comp_is_still
+                        and (action == 'to_screen' or both_requested)):
+                    lead, follower = companion, src
+                    item['src'] = str(lead.resolve().relative_to(work_res))
+
             if action == 'to_screen':
-                force = 'recording' if is_video(src) else 'screenshot'
+                force = 'recording' if is_video(lead) else 'screenshot'
             elif action == 'to_docs':
                 force = 'docs'
+            elif action == 'to_things':
+                force = 'things'
             else:
                 force = 'normal'
 
             dest, capture_type, new_name = plan_destination(
-                work, src, force_type=force, events=events,
+                work, lead, force_type=force, events=events,
             )
             item['capture_type'] = capture_type
-            item['dest'] = str(dest.relative_to(work))
-            item['new_name'] = new_name
 
-            if src.resolve() == dest.resolve():
+            follower_dest = None
+            follower_orig = None
+            if follower is not None:
+                follower_orig = follower.resolve()
+                stem = Path(new_name).stem
+                lead_dest, follower_dest = unique_pair_dests(
+                    dest.parent, stem, lead.suffix.lower(), follower.suffix.lower(),
+                )
+                dest = lead_dest
+                item['companion_src'] = str(follower_orig.relative_to(work_res))
+                item['companion_dest'] = str(follower_dest.resolve().relative_to(work_res))
+
+            item['dest'] = str(dest.resolve().relative_to(work_res))
+            item['new_name'] = dest.name
+            lead_orig = lead.resolve()
+
+            if lead_orig == dest.resolve() and (
+                    follower is None
+                    or follower_orig == follower_dest.resolve()):
                 item['ok'] = True
                 item['skipped'] = True
+                handled.add(lead_orig)
+                if follower_orig is not None:
+                    handled.add(follower_orig)
                 results.append(item)
                 continue
 
             if dry_run:
                 item['ok'] = True
+                handled.add(lead_orig)
+                if follower_orig is not None:
+                    handled.add(follower_orig)
                 results.append(item)
                 continue
 
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dest))
+            shutil.move(str(lead), str(dest))
+            if follower is not None and follower_dest is not None:
+                try:
+                    shutil.move(str(follower), str(follower_dest))
+                except Exception:
+                    try:
+                        if dest.is_file() and not Path(lead_orig).exists():
+                            shutil.move(str(dest), str(lead_orig))
+                    except Exception as rb:
+                        print(
+                            f"  [live-pair] rollback failed: {rb}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    raise
+                handled.add(follower_orig)
+            handled.add(lead_orig)
+            item['ok'] = True
+        except Exception as e:
+            item['error'] = str(e)
+        results.append(item)
+
+    return results
+
+
+def resolve_archived_date(path: Path) -> Optional[str]:
+    """YYYYMMDD from archived filename, else EXIF/mtime (first 8 of get_date)."""
+    date, _ = parse_archived_name(path.name)
+    if date and re.match(r'^\d{8}$', date):
+        return date
+    try:
+        exif = read_exif(path) if is_image(path) else {}
+    except Exception:
+        exif = {}
+    raw = get_date(path, exif)
+    if raw and len(raw) >= 8 and raw[:8].isdigit():
+        return raw[:8]
+    return None
+
+
+def return_to_default_month_paths(work: Path, paths: list,
+                                  dry_run: bool = False) -> list:
+    """Move by-date files into the default YYYY-MM month bucket (no theme).
+
+    Destination: by-date/<Y>/<YYYY-MM>/{photos|videos}/ — ignores events.yaml
+    theme matching (reverse of rebucket_themes for selected files).
+
+    Keeps basename when possible. Live Photo pairs (same-dir still ↔ .mov)
+    move together with a shared stem. Only accepts paths under by-date/.
+    """
+    results = []
+    work_res = work.resolve()
+
+    normalized = []
+    path_set = set()
+    for rel in paths:
+        rel = str(rel).lstrip('/')
+        if rel in path_set:
+            continue
+        path_set.add(rel)
+        normalized.append(rel)
+
+    handled = set()
+
+    for rel in normalized:
+        src = (work / rel).resolve()
+        if src in handled:
+            continue
+
+        item = {'ok': False, 'src': rel, 'dest': None, 'capture_type': 'normal'}
+        try:
+            if not str(src).startswith(str(work_res) + os.sep) and src != work_res:
+                item['error'] = 'path outside work'
+                results.append(item)
+                continue
+            if not src.is_file():
+                item['error'] = 'not a file'
+                results.append(item)
+                continue
+
+            try:
+                rel_check = str(src.relative_to(work_res))
+            except ValueError:
+                item['error'] = 'path outside work'
+                results.append(item)
+                continue
+            parts = Path(rel_check).parts
+            if len(parts) < 2 or parts[0] != 'by-date':
+                item['error'] = 'not under by-date/'
+                results.append(item)
+                continue
+
+            companion = live_companion_of(src)
+            lead = src
+            follower = companion
+            if companion is not None:
+                src_is_mov = src.suffix.lower() == LIVE_MOTION_EXT
+                comp_is_still = companion.suffix.lower() in LIVE_STILL_EXTS
+                try:
+                    comp_rel = str(companion.resolve().relative_to(work_res))
+                except ValueError:
+                    comp_rel = None
+                both_requested = bool(comp_rel and comp_rel in path_set)
+                if src_is_mov and comp_is_still and both_requested:
+                    lead, follower = companion, src
+                    item['src'] = str(lead.resolve().relative_to(work_res))
+
+            date = resolve_archived_date(lead)
+            if not date:
+                item['error'] = 'cannot resolve date'
+                results.append(item)
+                continue
+
+            year = date[:4]
+            month_str = f'{date[:4]}-{date[4:6]}'
+            sub = lead.parent.name
+            if sub not in ('photos', 'videos'):
+                sub = 'videos' if is_video(lead) else 'photos'
+            dest_dir = work / 'by-date' / year / month_str / sub
+
+            follower_dest = None
+            follower_orig = None
+            lead_orig = lead.resolve()
+            if follower is not None:
+                follower_orig = follower.resolve()
+
+            def _occupied(cand: Path, *self_paths: Path) -> bool:
+                if not cand.exists():
+                    return False
+                try:
+                    cres = cand.resolve()
+                except OSError:
+                    return True
+                for sp in self_paths:
+                    if sp is not None and cres == sp:
+                        return False
+                return True
+
+            if follower is not None:
+                d0 = dest_dir / lead.name
+                d1 = dest_dir / follower.name
+                if _occupied(d0, lead_orig, follower_orig) or _occupied(
+                        d1, lead_orig, follower_orig):
+                    lead_dest, follower_dest = unique_pair_dests(
+                        dest_dir, lead.stem,
+                        lead.suffix.lower(), follower.suffix.lower(),
+                    )
+                else:
+                    lead_dest, follower_dest = d0, d1
+                dest = lead_dest
+                item['companion_src'] = str(follower_orig.relative_to(work_res))
+                item['companion_dest'] = str(follower_dest.resolve().relative_to(work_res))
+            else:
+                cand = dest_dir / lead.name
+                if _occupied(cand, lead_orig):
+                    dest = get_unique_dest(cand)
+                else:
+                    dest = cand
+
+            item['dest'] = str(dest.resolve().relative_to(work_res))
+            item['new_name'] = dest.name
+
+            if lead_orig == dest.resolve() and (
+                    follower is None
+                    or follower_orig == follower_dest.resolve()):
+                item['ok'] = True
+                item['skipped'] = True
+                handled.add(lead_orig)
+                if follower_orig is not None:
+                    handled.add(follower_orig)
+                results.append(item)
+                continue
+
+            if dry_run:
+                item['ok'] = True
+                handled.add(lead_orig)
+                if follower_orig is not None:
+                    handled.add(follower_orig)
+                results.append(item)
+                continue
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(lead), str(dest))
+            if follower is not None and follower_dest is not None:
+                try:
+                    shutil.move(str(follower), str(follower_dest))
+                except Exception:
+                    try:
+                        if dest.is_file() and not Path(lead_orig).exists():
+                            shutil.move(str(dest), str(lead_orig))
+                    except Exception as rb:
+                        print(
+                            f"  [live-pair] rollback failed: {rb}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    raise
+                handled.add(follower_orig)
+            handled.add(lead_orig)
             item['ok'] = True
         except Exception as e:
             item['error'] = str(e)
@@ -668,10 +1153,50 @@ def parse_simple_yaml(text: str) -> dict:
                             # Field of current dict
                             if ':' in l_stripped:
                                 k, _, v = l_stripped.partition(':')
-                                cur_dict[k.strip()] = parse_value(v)
-                            elif l_stripped.startswith('- ') and cur_dict.get(k.strip()) is None:
-                                # List field starting with '- item'
-                                pass  # simplified; won't hit in our schema
+                                k = k.strip()
+                                v = v.strip()
+                                if v == '' and k == 'date_range':
+                                    # Nested start/end under date_range
+                                    nested = {}
+                                    j2 = j + 1
+                                    while j2 < len(lines):
+                                        nl = lines[j2]
+                                        if not nl.strip() or nl.strip().startswith('#'):
+                                            j2 += 1
+                                            continue
+                                        if get_indent(nl) <= l_indent:
+                                            break
+                                        ns = nl.strip()
+                                        if ':' in ns:
+                                            nk, _, nv = ns.partition(':')
+                                            nested[nk.strip()] = parse_value(nv)
+                                        j2 += 1
+                                    cur_dict[k] = nested
+                                    j = j2
+                                    continue
+                                if v == '' and k in ('sources', 'files'):
+                                    # Block list: sources:\n      - iphone
+                                    list_items = []
+                                    j2 = j + 1
+                                    while j2 < len(lines):
+                                        nl = lines[j2]
+                                        if not nl.strip() or nl.strip().startswith('#'):
+                                            j2 += 1
+                                            continue
+                                        if get_indent(nl) <= l_indent:
+                                            break
+                                        ns = nl.strip()
+                                        if ns.startswith('- '):
+                                            list_items.append(parse_value(ns[2:].strip()))
+                                        elif ns.startswith('-'):
+                                            list_items.append(parse_value(ns[1:].strip()))
+                                        else:
+                                            break
+                                        j2 += 1
+                                    cur_dict[k] = list_items
+                                    j = j2
+                                    continue
+                                cur_dict[k] = parse_value(v)
                         j += 1
                     if cur_dict is not None:
                         items.append(cur_dict)
@@ -706,30 +1231,270 @@ def parse_simple_yaml(text: str) -> dict:
     return result
 
 
-def load_events(work: Path, events_path: Optional[Path]) -> list[dict]:
-    path = events_path or (work / '_meta' / 'events.yaml')
-    if not path.exists():
-        return []
+_THEME_MONTH_RE = re.compile(r'^\d{4}-\d{2}$')
+_THEME_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_THEME_NAME_RE = re.compile(r'^[^/\\\0]+$')
+
+
+def _as_iso_date(value) -> str:
+    """Normalize YAML date / datetime / str to YYYY-MM-DD (or '')."""
+    if value is None:
+        return ''
+    if hasattr(value, 'isoformat'):
+        try:
+            return str(value.isoformat())[:10]
+        except Exception:
+            pass
+    s = str(value).strip()
+    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+        return s[:10]
+    return s
+
+
+def _require_iso_calendar_date(value, *, label: str = 'date') -> str:
+    """Return YYYY-MM-DD calendar date, or '' if empty. Raise ValueError if invalid."""
+    s = _as_iso_date(value)
+    if not s:
+        return ''
+    if not _THEME_DATE_RE.match(s):
+        raise ValueError(f'{label} must be YYYY-MM-DD (got {s!r})')
     try:
-        text = path.read_text()
-        # Try YAML first
+        date.fromisoformat(s)
+    except ValueError as e:
+        raise ValueError(f'{label} is not a valid calendar date (got {s!r})') from e
+    return s
+
+
+def _as_str_list(value) -> list:
+    """Normalize sources/files to a list of non-empty strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        s = value.strip()
+        return [s] if s else []
+    if isinstance(value, (list, tuple)):
+        out = []
+        for x in value:
+            if x is None:
+                continue
+            s = str(x).strip()
+            if s:
+                out.append(s)
+        return out
+    s = str(value).strip()
+    return [s] if s else []
+
+
+def _theme_range(theme: dict) -> tuple:
+    """Return (start_iso, end_iso) for a theme, either nested or flat. Empty strings if none."""
+    dr = theme.get('date_range') if isinstance(theme.get('date_range'), dict) else None
+    if dr is not None:
+        return _as_iso_date(dr.get('start')), _as_iso_date(dr.get('end'))
+    return _as_iso_date(theme.get('start')), _as_iso_date(theme.get('end'))
+
+
+def _iter_months_spanned(start_iso: str, end_iso: str):
+    """Yield YYYY-MM from start month through end month inclusive."""
+    if not start_iso or not end_iso or len(start_iso) < 7 or len(end_iso) < 7:
+        return
+    sm, em = start_iso[:7], end_iso[:7]
+    if not _THEME_MONTH_RE.match(sm) or not _THEME_MONTH_RE.match(em):
+        return
+    y, m = int(sm[:4]), int(sm[5:7])
+    ey, emonth = int(em[:4]), int(em[5:7])
+    if (y, m) > (ey, emonth):
+        return
+    while (y, m) <= (ey, emonth):
+        yield f'{y:04d}-{m:02d}'
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+
+def _normalize_theme_dict(t: dict) -> dict:
+    """Copy theme with string dates and list sources/files (PyYAML-safe).
+
+    If date_range.start is set, month becomes start's YYYY-MM (bucket = start month).
+    """
+    out = dict(t)
+    if 'month' in out and out['month'] is not None:
+        m = out['month']
+        if hasattr(m, 'isoformat'):
+            out['month'] = str(m.isoformat())[:7]
+        else:
+            out['month'] = str(m).strip()
+
+    dr = out.get('date_range')
+    if isinstance(dr, dict):
+        out['date_range'] = {
+            'start': _require_iso_calendar_date(dr.get('start'), label='date_range.start'),
+            'end': _require_iso_calendar_date(dr.get('end'), label='date_range.end'),
+        }
+    if 'start' in out:
+        out['start'] = _require_iso_calendar_date(out.get('start'), label='date_range.start')
+    if 'end' in out:
+        out['end'] = _require_iso_calendar_date(out.get('end'), label='date_range.end')
+    if 'sources' in out:
+        out['sources'] = _as_str_list(out.get('sources'))
+    if 'files' in out:
+        out['files'] = _as_str_list(out.get('files'))
+    if 'name' in out and out['name'] is not None:
+        out['name'] = str(out['name']).strip()
+
+    start, _end = _theme_range(out)
+    if start and len(start) >= 7:
+        derived = start[:7]
+        existing = str(out.get('month') or '').strip()
+        if existing and _THEME_MONTH_RE.match(existing) and existing != derived:
+            raise ValueError(
+                f'month {existing!r} must equal date_range start month {derived!r}'
+            )
+        out['month'] = derived
+    return out
+
+
+def parse_events_yaml_text(text: str) -> list[dict]:
+    """Parse events.yaml text into theme dicts. Raises ValueError on parse errors."""
+    try:
         try:
             import yaml  # type: ignore
             data = yaml.safe_load(text) or {}
         except ImportError:
             data = parse_simple_yaml(text)
-        themes = data.get('themes', [])
-        if not isinstance(themes, list):
-            return []
-        # Normalize: convert list of dicts
-        result = []
-        for t in themes:
-            if isinstance(t, dict):
-                result.append(t)
-        return result
+    except ValueError:
+        raise
     except Exception as e:
-        print(f"[warn] could not load events.yaml: {e}", file=sys.stderr)
+        raise ValueError(f'YAML parse error: {e}') from e
+
+    if not isinstance(data, dict):
+        raise ValueError('events.yaml root must be a mapping')
+    themes = data.get('themes', [])
+    if themes is None:
+        themes = []
+    if not isinstance(themes, list):
+        raise ValueError('themes must be a list')
+
+    result: list[dict] = []
+    for i, t in enumerate(themes):
+        if not isinstance(t, dict):
+            raise ValueError(f'themes[{i}] must be a mapping')
+        try:
+            result.append(_normalize_theme_dict(t))
+        except ValueError as e:
+            raise ValueError(f'themes[{i}]: {e}') from e
+    return result
+
+
+def validate_events_themes(themes: list) -> None:
+    """Require each theme has safe name, YYYY-MM month, and a match rule. Raises ValueError."""
+    seen_names: dict[str, int] = {}
+    for i, t in enumerate(themes):
+        if not isinstance(t, dict):
+            raise ValueError(f'themes[{i}] must be a mapping')
+        name = t.get('name')
+        month = t.get('month')
+        if name is None or not str(name).strip():
+            raise ValueError(f'themes[{i}]: name required')
+        name_s = str(name).strip()
+        if (
+            not _THEME_NAME_RE.match(name_s)
+            or name_s in ('.', '..')
+            or '..' in name_s
+        ):
+            raise ValueError(
+                f'themes[{i}]: name must not contain /, \\, or .. '
+                f'(got {name_s!r})'
+            )
+        if name_s in seen_names:
+            raise ValueError(
+                f'themes[{i}] ({name_s}): duplicate theme name '
+                f'(also themes[{seen_names[name_s]}])'
+            )
+        seen_names[name_s] = i
+
+        # Strict calendar dates for date_range (reject "not-a-date", 2026-02-30, etc.)
+        try:
+            dr = t.get('date_range') if isinstance(t.get('date_range'), dict) else None
+            if dr is not None:
+                start = _require_iso_calendar_date(dr.get('start'), label='date_range.start')
+                end = _require_iso_calendar_date(dr.get('end'), label='date_range.end')
+            else:
+                start = _require_iso_calendar_date(t.get('start'), label='date_range.start')
+                end = _require_iso_calendar_date(t.get('end'), label='date_range.end')
+        except ValueError as e:
+            raise ValueError(f'themes[{i}] ({name_s}): {e}') from e
+
+        month_s = '' if month is None else str(month).strip()
+        if start and len(start) >= 7:
+            derived = start[:7]
+            if month_s and month_s != derived:
+                raise ValueError(
+                    f'themes[{i}] ({name_s}): month {month_s!r} must equal '
+                    f'date_range start month {derived!r}'
+                )
+            if not month_s:
+                month_s = derived
+        if not _THEME_MONTH_RE.match(month_s):
+            raise ValueError(
+                f'themes[{i}]: month must be YYYY-MM '
+                f'(set month or provide date_range.start)'
+            )
+
+        sources = _as_str_list(t.get('sources'))
+        files = _as_str_list(t.get('files'))
+        if not start and not end and not sources and not files:
+            raise ValueError(
+                f'themes[{i}] ({name_s}): need date_range and/or sources and/or files '
+                f'(name+month alone never matches any file)'
+            )
+        if (start and not end) or (end and not start):
+            raise ValueError(
+                f'themes[{i}] ({name_s}): date_range needs both start and end'
+            )
+        if start and end and start > end:
+            raise ValueError(
+                f'themes[{i}] ({name_s}): date_range start must be <= end'
+            )
+
+
+def warn_overlapping_themes(themes: list) -> None:
+    """Warn on stderr when any themes have overlapping date_ranges."""
+    ranged = []
+    for t in themes or []:
+        if not isinstance(t, dict):
+            continue
+        name = str(t.get('name') or '').strip() or '?'
+        start, end = _theme_range(t)
+        if not start or not end:
+            continue
+        ranged.append((name, start, end))
+    for i in range(len(ranged)):
+        n1, s1, e1 = ranged[i]
+        for j in range(i + 1, len(ranged)):
+            n2, s2, e2 = ranged[j]
+            if s1 <= e2 and s2 <= e1:
+                print(
+                    f"  [warn] overlapping themes: "
+                    f"{n1!r} ({s1}–{e1}) vs {n2!r} ({s2}–{e2}); "
+                    f"earlier entry in events.yaml wins",
+                    file=sys.stderr,
+                )
+
+
+def load_events(work: Path, events_path: Optional[Path]) -> list[dict]:
+    """Load and validate themes. Raises ValueError if events.yaml is invalid."""
+    path = events_path or (work / '_meta' / 'events.yaml')
+    if not path.exists():
         return []
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError as e:
+        raise ValueError(f'cannot read events.yaml: {e}') from e
+    themes = parse_events_yaml_text(text)
+    validate_events_themes(themes)
+    warn_overlapping_themes(themes)
+    return themes
 
 
 def match_theme(file_path: Path, date: str, source: Optional[str], events: list) -> Optional[dict]:
@@ -741,50 +1506,56 @@ def match_theme(file_path: Path, date: str, source: Optional[str], events: list)
     year, month = m.groups()
     month_str = f"{year}-{month}"
 
-    # Try to extract day for date_range matching
     file_date = date[:8]  # YYYYMMDD
     file_date_iso = f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:8]}"
 
-    # Relativize path for files: matching
+    # Relativize path for files: matching (prefer path under work-like roots)
     try:
-        rel_path = str(file_path.relative_to(file_path.parents[len(file_path.parents) - 2]))
+        rel_path = str(file_path).replace('\\', '/')
+        parts = Path(rel_path).parts
+        if 'by-date' in parts:
+            idx = parts.index('by-date')
+            rel_path = '/'.join(parts[idx:])
+        else:
+            rel_path = file_path.name
     except Exception:
         rel_path = str(file_path)
+    base_name = Path(rel_path).name
 
     for theme in events:
-        if theme.get('month') != month_str:
+        # Highest: explicit files (basename or full relative path; no substring)
+        explicit = _as_str_list(theme.get('files'))
+        if explicit:
+            for pat in explicit:
+                p = pat.strip()
+                while p.startswith('./'):
+                    p = p[2:]
+                p = p.lstrip('/')
+                if not p:
+                    continue
+                if p == base_name or p == rel_path or rel_path.endswith('/' + p):
+                    return theme
+
+        start, end = _theme_range(theme)
+        # date_range may span months; do not require file month == theme.month
+        if start and end:
+            if start <= file_date_iso <= end:
+                sources = _as_str_list(theme.get('sources'))
+                if not sources or (source is not None and source in sources):
+                    return theme
             continue
 
-        # Highest: explicit files
-        explicit = theme.get('files') or []
-        if explicit is None:
-            explicit = []
-        if isinstance(explicit, list) and explicit and any(rel_path.endswith(f) or f in rel_path for f in explicit):
-            return theme
-
-        # Date range + source (supports both nested and flat formats)
-        dr = theme.get('date_range')
-        if dr is None:
-            # Flat format (parser limitation): start/end at top level
-            start = theme.get('start', '')
-            end = theme.get('end', '')
-        elif isinstance(dr, dict):
-            start = dr.get('start', '')
-            end = dr.get('end', '')
-        else:
-            start = end = ''
-        if start and end and start <= file_date_iso <= end:
-            sources = theme.get('sources') or []
-            if isinstance(sources, list) and (not sources or source in sources):
+        # Only sources (no date_range): still limited to theme.month
+        if str(theme.get('month') or '').strip() != month_str:
+            continue
+        sources = _as_str_list(theme.get('sources'))
+        if sources and source and source in sources:
+            month_themes = [
+                t for t in events
+                if str(t.get('month') or '').strip() == month_str
+            ]
+            if len(month_themes) == 1:
                 return theme
-
-        # Only sources (when single theme in month AND no date_range)
-        if not start and not end:
-            sources = theme.get('sources') or []
-            if isinstance(sources, list) and source and source in sources:
-                month_themes = [t for t in events if t.get('month') == month_str]
-                if len(month_themes) == 1:
-                    return theme
 
     return None
 
@@ -798,10 +1569,46 @@ def scan_inbox(work: Path) -> list[Path]:
     files = []
     for f in inbox.rglob('*'):
         if f.is_file():
-            # Skip .DS_Store and other system files
-            if f.name.startswith('.') and f.name != '.source':
+            # Skip .DS_Store, .source sidecars, and other dotfiles
+            if f.name.startswith('.'):
                 continue
             files.append(f)
+    return files
+
+
+def scan_by_date_default_months(work: Path, events: list,
+                                theme_names: Optional[list] = None) -> list[Path]:
+    """List files in by-date/<Y>/<YYYY-MM>/{photos,videos}/ for months themes cover.
+
+    For themes with date_range, every YYYY-MM spanned by the range is scanned
+    (so cross-month files can be pulled into the start-month theme bucket).
+    Without date_range, only theme.month is used.
+    Does not include theme side buckets (YYYY-MM_name).
+    If theme_names is set, only months belonging to those theme names are scanned.
+    """
+    files = []
+    scoped = events or []
+    if theme_names is not None:
+        want = {str(n).strip() for n in theme_names if str(n).strip()}
+        scoped = [t for t in scoped if str(t.get('name') or '').strip() in want]
+    months: set = set()
+    for t in scoped:
+        start, end = _theme_range(t)
+        if start and end:
+            months.update(_iter_months_spanned(start, end))
+        elif t.get('month'):
+            months.add(str(t.get('month')).strip())
+    for month_str in sorted(m for m in months if m):
+        for d in _default_month_dirs(work, month_str):
+            try:
+                for f in d.iterdir():
+                    if not f.is_file():
+                        continue
+                    if f.name.startswith('.'):
+                        continue
+                    files.append(f)
+            except OSError as e:
+                print(f'  [warn] cannot list {d}: {e}', file=sys.stderr)
     return files
 
 
@@ -832,6 +1639,7 @@ def process_file(work: Path, f: Path, events: list, cli_source: Optional[str],
     if dry_run:
         print(f"  [dry-run] {f.relative_to(work)} -> {dest.relative_to(work)}")
     else:
+        _ensure_dest_under_work(work, dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(f), str(dest))
         stats['moved'] += 1
@@ -846,9 +1654,498 @@ def process_file(work: Path, f: Path, events: list, cli_source: Optional[str],
         stats['photos'] += 1
 
 
+def process_live_pair(work: Path, still: Path, mov: Path, events: list,
+                      cli_source: Optional[str], dry_run: bool, stats: dict):
+    """Move/rename a Live Photo pair into by-date/.../photos/ with shared stem."""
+    still_dest, mov_dest, _stem = plan_live_pair(
+        work, still, mov, events=events, cli_source=cli_source,
+    )
+    cross = still.parent.resolve() != mov.parent.resolve()
+    tag = '[live-pair-cross]' if cross else '[live-pair]'
+    if dry_run:
+        print(
+            f"  [dry-run] {tag} {still.relative_to(work)} -> "
+            f"{still_dest.relative_to(work)}"
+        )
+        print(
+            f"  [dry-run] {tag} {mov.relative_to(work)} -> "
+            f"{mov_dest.relative_to(work)}"
+        )
+    else:
+        _ensure_dest_under_work(work, still_dest)
+        _ensure_dest_under_work(work, mov_dest)
+        still_orig = still.resolve()
+        still_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(still), str(still_dest))
+        try:
+            shutil.move(str(mov), str(mov_dest))
+        except Exception:
+            # Best-effort rollback so we never leave a half pair at dest.
+            try:
+                if still_dest.is_file() and not still_orig.exists():
+                    shutil.move(str(still_dest), str(still_orig))
+            except Exception as rb:
+                print(
+                    f"  [live-pair] rollback failed: {rb}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            raise
+        stats['moved'] += 2
+
+    stats['photos'] += 1  # still counts as photo
+    stats['live_pairs'] += 1
+
+
+# === Rebucket default by-date months → theme buckets (no inbox) ===
+
+ARCHIVED_NAME_RE = re.compile(
+    r'^(?P<date>\d{8})_(?P<time>\d{6})'
+    r'(?:_(?P<source>[a-zA-Z0-9-]+))?'
+    r'(?:_live)?'
+    r'_(?P<hash>[0-9a-fA-F]{4,})'
+    r'(?P<ext>\.[^.]+)$',
+    re.IGNORECASE,
+)
+
+
+def parse_archived_name(name: str) -> tuple:
+    """Parse archived filename → (date_yyyymmdd, source_or_None) or (None, None)."""
+    m = ARCHIVED_NAME_RE.match(name)
+    if not m:
+        return None, None
+    source = m.group('source')
+    if source and source.lower() == 'live':
+        # Rare: ..._live_<hash> with no camera source
+        source = None
+    return m.group('date'), source
+
+
+def _load_stars_json(work: Path, bucket: str) -> dict:
+    path = work / '_meta' / 'stars' / f'{bucket}.json'
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if isinstance(data, list):
+            return {k: True for k in data}
+        return {k: bool(v) for k, v in data.items() if v}
+    except Exception:
+        return {}
+
+
+def _save_stars_json(work: Path, bucket: str, stars: dict) -> None:
+    path = work / '_meta' / 'stars' / f'{bucket}.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({k: True for k in stars}, indent=2, ensure_ascii=False) + '\n',
+        encoding='utf-8',
+    )
+
+
+def migrate_star_path(work: Path, old_rel: str, new_rel: str) -> None:
+    """Move a star entry from old_rel's bucket to new_rel's bucket if starred."""
+    old_bucket = star_bucket_for_rel(old_rel)
+    new_bucket = star_bucket_for_rel(new_rel)
+    stars = _load_stars_json(work, old_bucket)
+    if old_rel not in stars:
+        stars_dir = work / '_meta' / 'stars'
+        if not stars_dir.is_dir():
+            return
+        found = False
+        for f in stars_dir.glob('*.json'):
+            bucket = f.stem
+            s = _load_stars_json(work, bucket)
+            if old_rel in s:
+                s.pop(old_rel, None)
+                _save_stars_json(work, bucket, s)
+                ns = _load_stars_json(work, new_bucket)
+                ns[new_rel] = True
+                _save_stars_json(work, new_bucket, ns)
+                found = True
+                break
+        if not found:
+            return
+        return
+    stars.pop(old_rel, None)
+    _save_stars_json(work, old_bucket, stars)
+    ns = _load_stars_json(work, new_bucket)
+    ns[new_rel] = True
+    _save_stars_json(work, new_bucket, ns)
+
+
+def _default_month_dirs(work: Path, month_str: str) -> list:
+    """Return existing by-date/<year>/<YYYY-MM>/{photos,videos} dirs (default bucket only)."""
+    if not re.match(r'^\d{4}-\d{2}$', month_str):
+        return []
+    year = month_str[:4]
+    base = work / 'by-date' / year / month_str
+    out = []
+    for sub in ('photos', 'videos'):
+        d = base / sub
+        if d.is_dir():
+            out.append(d)
+    return out
+
+
+_THEME_BUCKET_RE = re.compile(r'^(\d{4}-\d{2})_(.+)$')
+
+
+def iter_theme_bucket_dirs(work: Path):
+    """Yield (bucket_dir, month_str, theme_name) for by-date theme side buckets."""
+    by_date = work / 'by-date'
+    if not by_date.is_dir():
+        return
+    try:
+        year_dirs = sorted(by_date.iterdir())
+    except OSError:
+        return
+    for year_dir in year_dirs:
+        if not year_dir.is_dir() or not year_dir.name.isdigit():
+            continue
+        try:
+            buckets = sorted(year_dir.iterdir())
+        except OSError:
+            continue
+        for bucket in buckets:
+            if not bucket.is_dir():
+                continue
+            m = _THEME_BUCKET_RE.match(bucket.name)
+            if not m:
+                continue
+            yield bucket, m.group(1), m.group(2)
+
+
+def scan_by_date_theme_buckets(work: Path,
+                               theme_names: Optional[list] = None) -> list[Path]:
+    """List files in by-date theme side buckets YYYY-MM_<name>/{photos,videos}/.
+
+    If theme_names is set, only buckets whose theme suffix is in that set
+    (scoped sync — does not touch other theme buckets or unrelated orphans).
+    """
+    files = []
+    want = None
+    if theme_names is not None:
+        want = {str(n).strip() for n in theme_names if str(n).strip()}
+    for bucket, _month, name in iter_theme_bucket_dirs(work):
+        if want is not None and name not in want:
+            continue
+        for sub in ('photos', 'videos'):
+            d = bucket / sub
+            if not d.is_dir():
+                continue
+            try:
+                for f in d.iterdir():
+                    if not f.is_file():
+                        continue
+                    if f.name.startswith('.'):
+                        continue
+                    files.append(f)
+            except OSError as e:
+                print(f'  [warn] cannot list {d}: {e}', file=sys.stderr)
+    return files
+
+
+def _ensure_dest_under_work(work: Path, dest: Path) -> Path:
+    """Resolve dest and refuse paths outside work (path-traversal guard)."""
+    work_res = work.resolve()
+    dest_res = dest.resolve()
+    if dest_res != work_res and not str(dest_res).startswith(str(work_res) + os.sep):
+        raise ValueError(f'destination escapes work: {dest}')
+    return dest_res
+
+
+def _empty_reconcile_stats() -> dict:
+    return {
+        'scanned': 0,
+        'moved': 0,
+        'into_theme': 0,
+        'to_default': 0,
+        'reassign': 0,
+        'skipped': 0,
+        'parse_fail': 0,
+        'errors': 0,
+        'by_theme': {},
+    }
+
+
+def _resolve_live_lead(f: Path) -> tuple:
+    """Return (lead, follower, date, source) or (None, None, None, None) on parse fail."""
+    date, source = parse_archived_name(f.name)
+    if not date:
+        return None, None, None, None
+    companion = live_companion_of(f)
+    lead = f
+    follower = companion
+    if companion is not None:
+        if f.suffix.lower() == LIVE_MOTION_EXT and companion.suffix.lower() in LIVE_STILL_EXTS:
+            lead, follower = companion, f
+            date, source = parse_archived_name(lead.name)
+            if not date:
+                return None, None, None, None
+    return lead, follower, date, source
+
+
+def _dest_dir_for_date(work: Path, date: str, theme: Optional[dict], sub: str) -> Path:
+    year, month_dir = _theme_bucket_parts(date, theme)
+    if sub not in ('photos', 'videos'):
+        sub = 'videos' if sub == 'videos' else 'photos'
+    return work / 'by-date' / year / month_dir / sub
+
+
+def _move_archived_group(work: Path, work_res: Path, lead: Path, follower: Optional[Path],
+                         dest_dir: Path, dry_run: bool, verbose: bool,
+                         handled: set, stats: dict, kind: str,
+                         theme_key: Optional[str] = None) -> bool:
+    """Move lead[+follower] into dest_dir. kind is into_theme|to_default|reassign.
+
+    Returns True on success (including dry-run / already-there), False on error.
+    """
+    srcs = [lead] if follower is None else [lead, follower]
+    if len(srcs) == 2:
+        d0 = dest_dir / srcs[0].name
+        d1 = dest_dir / srcs[1].name
+        occupied = False
+        for cand, src in ((d0, srcs[0]), (d1, srcs[1])):
+            if not cand.exists():
+                continue
+            try:
+                if cand.resolve() != src.resolve():
+                    occupied = True
+                    break
+            except OSError:
+                occupied = True
+                break
+        if occupied:
+            dests = list(unique_pair_dests(
+                dest_dir, srcs[0].stem,
+                srcs[0].suffix.lower(), srcs[1].suffix.lower(),
+            ))
+        else:
+            dests = [d0, d1]
+    else:
+        cand = dest_dir / srcs[0].name
+        try:
+            same = cand.exists() and cand.resolve() == srcs[0].resolve()
+        except OSError:
+            same = False
+        dests = [cand if same or not cand.exists() else get_unique_dest(cand)]
+
+    moves = []
+    for src, dest in zip(srcs, dests):
+        try:
+            old_rel = str(src.resolve().relative_to(work_res))
+        except ValueError:
+            old_rel = str(src.relative_to(work))
+        moves.append((src, dest, old_rel))
+
+    # Already at destination
+    try:
+        if all(src.resolve() == dest.resolve() for src, dest, _ in moves):
+            for src, _dest, _old in moves:
+                handled.add(src.resolve())
+            return True
+    except OSError:
+        pass
+
+    def _count_one() -> None:
+        stats['moved'] += 1
+        stats[kind] = stats.get(kind, 0) + 1
+        if theme_key:
+            stats['by_theme'].setdefault(theme_key, 0)
+            stats['by_theme'][theme_key] += 1
+
+    if dry_run:
+        for src, dest, _old in moves:
+            _ensure_dest_under_work(work, dest)
+            if verbose:
+                print(f'  [dry-run] [{kind}] {src.relative_to(work)} -> {dest.relative_to(work)}')
+            handled.add(src.resolve())
+            _count_one()
+        return True
+
+    dest_dir_res = _ensure_dest_under_work(work, dest_dir)
+    for _src, dest, _old in moves:
+        _ensure_dest_under_work(work, dest)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    del dest_dir_res
+    done = []
+    try:
+        for src, dest, old_rel in moves:
+            if src.resolve() == dest.resolve():
+                handled.add(src.resolve())
+                continue
+            shutil.move(str(src), str(dest))
+            done.append((src, dest, old_rel))
+            handled.add(src.resolve())
+            try:
+                new_rel = str(dest.resolve().relative_to(work_res))
+            except ValueError:
+                new_rel = str(dest.relative_to(work))
+            migrate_star_path(work, old_rel, new_rel)
+            if verbose:
+                print(f'  [{kind}] {src.relative_to(work)} -> {dest.relative_to(work)}')
+            _count_one()
+        return True
+    except Exception as e:
+        for src, dest, _old in reversed(done):
+            try:
+                if dest.is_file() and not Path(src).exists():
+                    shutil.move(str(dest), str(src))
+            except Exception as rb:
+                print(f'  [reconcile] rollback failed: {rb}', file=sys.stderr)
+        print(f'  [error] {lead.relative_to(work)}: {e}', file=sys.stderr)
+        stats['errors'] += 1
+        return False
+
+
+def rebucket_themes(work: Path, events: list, dry_run: bool = True,
+                    verbose: bool = False, themes: Optional[list] = None) -> dict:
+    """Bidirectional theme sync (alias of reconcile_themes)."""
+    return reconcile_themes(
+        work, events, dry_run=dry_run, verbose=verbose, themes=themes,
+    )
+
+
+def reconcile_themes(work: Path, events: list, dry_run: bool = True,
+                     verbose: bool = False, themes: Optional[list] = None) -> dict:
+    """Two-way theme sync on by-date (does NOT scan inbox).
+
+    Phase A — into_theme: default YYYY-MM → matching theme bucket.
+    Phase B — to_default / reassign: theme side buckets rematched against
+    current events.yaml (orphan / renamed / shrunk ranges demote or move).
+
+    themes: if set, only sync those theme names (default-month months for those
+    themes + their YYYY-MM_<name> buckets). Other theme buckets are untouched.
+    themes=None means full sync (all themes + all theme buckets including orphans).
+    """
+    stats = _empty_reconcile_stats()
+    events = events or []
+    work_res = work.resolve()
+    handled: set = set()
+    scope = None
+    if themes is not None:
+        scope = {str(n).strip() for n in themes if str(n).strip()}
+        if not scope:
+            return stats
+
+    # --- Phase A: default month → theme ---
+    if events:
+        for f in scan_by_date_default_months(work, events, theme_names=themes):
+            try:
+                fres = f.resolve()
+            except OSError:
+                stats['errors'] += 1
+                continue
+            if fres in handled:
+                continue
+
+            stats['scanned'] += 1
+            lead, follower, date, source = _resolve_live_lead(f)
+            if lead is None:
+                stats['parse_fail'] += 1
+                stats['skipped'] += 1
+                continue
+
+            theme = match_theme(lead, date, source, events)
+            if not theme:
+                stats['skipped'] += 1
+                continue
+            theme_name = (theme.get('name') or '').strip()
+            if not theme_name:
+                stats['skipped'] += 1
+                continue
+            if scope is not None and theme_name not in scope:
+                # Matched another theme — leave for that theme's sync
+                stats['skipped'] += 1
+                continue
+
+            sub = lead.parent.name
+            if sub not in ('photos', 'videos'):
+                sub = 'videos' if is_video(lead) else 'photos'
+            dest_dir = _dest_dir_for_date(work, date, theme, sub)
+            _move_archived_group(
+                work, work_res, lead, follower, dest_dir,
+                dry_run, verbose, handled, stats, 'into_theme',
+                theme_key=theme_name,
+            )
+
+    # --- Phase B: theme buckets → stay / reassign / default ---
+    for f in scan_by_date_theme_buckets(work, theme_names=themes):
+        try:
+            fres = f.resolve()
+        except OSError:
+            stats['errors'] += 1
+            continue
+        if fres in handled:
+            continue
+
+        stats['scanned'] += 1
+        lead, follower, date, source = _resolve_live_lead(f)
+        if lead is None:
+            stats['parse_fail'] += 1
+            stats['skipped'] += 1
+            continue
+
+        theme = match_theme(lead, date, source, events) if events else None
+        matched_name = (theme.get('name') or '').strip() if theme else ''
+
+        sub = lead.parent.name
+        if sub not in ('photos', 'videos'):
+            sub = 'videos' if is_video(lead) else 'photos'
+
+        if matched_name:
+            # Full bucket identity: YYYY-MM_name (dest_dir), not name suffix alone.
+            # Same theme name but wrong start-month bucket → reassign.
+            dest_dir = _dest_dir_for_date(work, date, theme, sub)
+            try:
+                already = lead.parent.resolve() == dest_dir.resolve()
+            except OSError:
+                already = False
+            if already:
+                stats['skipped'] += 1
+                handled.add(lead.resolve())
+                if follower is not None:
+                    try:
+                        handled.add(follower.resolve())
+                    except OSError:
+                        pass
+                continue
+            kind = 'reassign'
+            theme_key = matched_name
+        else:
+            dest_dir = _dest_dir_for_date(work, date, None, sub)
+            kind = 'to_default'
+            theme_key = None
+
+        _move_archived_group(
+            work, work_res, lead, follower, dest_dir,
+            dry_run, verbose, handled, stats, kind,
+            theme_key=theme_key,
+        )
+
+    return stats
+
+
+def _print_rebucket_summary(stats: dict, dry_run: bool) -> None:
+    prefix = '[dry-run] Would sync' if dry_run else '✓ Synced'
+    moved = stats.get('moved', 0)
+    print(
+        f"{prefix} {moved} by-date file(s) "
+        f"(into_theme={stats.get('into_theme', 0)}, "
+        f"to_default={stats.get('to_default', 0)}, "
+        f"reassign={stats.get('reassign', 0)}; "
+        f"scanned {stats.get('scanned', 0)}, skipped {stats.get('skipped', 0)}, "
+        f"parse_fail {stats.get('parse_fail', 0)}, errors {stats.get('errors', 0)})"
+    )
+    for name, n in sorted((stats.get('by_theme') or {}).items()):
+        print(f'  → {name}: {n}')
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Rename + organize into by-date / screenshots / screenrecords')
+        description='Rename + organize inbox into by-date / screenshots / screenrecords. '
+                    'Theme sync is separate: --rebucket-themes --theme NAME or --all')
     parser.add_argument('--work', default='/Volumes/Storage',
                         help='Working disk root (default: /Volumes/Storage)')
     parser.add_argument('--apply-events', default=None,
@@ -858,6 +2155,14 @@ def main():
     parser.add_argument('--no-gps-rule', dest='no_gps_rule', action='store_true',
                         default=False,
                         help='Deprecated (v7): aggressive GPS/Make rules are always on')
+    parser.add_argument('--rebucket-themes', action='store_true',
+                        help='Only sync by-date themes both ways (skip inbox). '
+                             'Requires --theme NAME and/or --all')
+    parser.add_argument('--theme', action='append', default=[],
+                        help='Theme name to sync (repeatable). Used with --rebucket-themes')
+    parser.add_argument('--all', dest='all_themes', action='store_true',
+                        help='With --rebucket-themes: sync all themes (may overwrite '
+                             'manual moves in every theme bucket)')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
@@ -868,14 +2173,50 @@ def main():
         sys.exit(1)
 
     events_path = Path(args.apply_events) if args.apply_events else None
-    events = load_events(work, events_path)
+    try:
+        events = load_events(work, events_path)
+    except ValueError as e:
+        print(f"ERROR: events.yaml: {e}", file=sys.stderr)
+        sys.exit(1)
     print(f"→ Loaded {len(events)} themes from events.yaml")
 
+    if args.rebucket_themes:
+        theme_names = [t.strip() for t in (args.theme or []) if str(t).strip()]
+        if not theme_names and not args.all_themes:
+            print(
+                'ERROR: --rebucket-themes requires --theme NAME and/or --all\n'
+                '  Example (one theme):  --rebucket-themes --theme 香港-深圳\n'
+                '  Example (all themes): --rebucket-themes --all\n'
+                '  Full sync can overwrite manual moves in every theme bucket.',
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        mode = 'dry-run' if args.dry_run else 'apply'
+        if args.all_themes and not theme_names:
+            scope_label = 'all themes'
+            scope_arg = None
+        elif args.all_themes and theme_names:
+            # --all wins as full sync; ignore redundant --theme
+            scope_label = 'all themes'
+            scope_arg = None
+        else:
+            scope_label = 'themes: ' + ', '.join(theme_names)
+            scope_arg = theme_names
+        print(f'→ Theme sync ({mode}): {scope_label}')
+        stats = reconcile_themes(
+            work, events, dry_run=args.dry_run, verbose=True, themes=scope_arg,
+        )
+        _print_rebucket_summary(stats, args.dry_run)
+        return
+
     files = scan_inbox(work)
-    print(f"→ Found {len(files)} files in {work}/inbox")
+    print(f"→ Scanning inbox/ (theme sync is separate: --rebucket-themes --theme …)")
+    print(f"→ inbox: {len(files)} file(s)")
 
     if not files:
-        print("✓ Nothing to process")
+        print('→ inbox empty — nothing to do')
+        print('→ Tip: sync one theme with --rebucket-themes --theme <name> '
+              '(or --all for every theme)')
         return
 
     # Ensure destination roots exist on apply
@@ -883,21 +2224,39 @@ def main():
         (work / 'screenshots').mkdir(parents=True, exist_ok=True)
         (work / 'screenrecords').mkdir(parents=True, exist_ok=True)
         (work / 'docs').mkdir(parents=True, exist_ok=True)
+        (work / 'things').mkdir(parents=True, exist_ok=True)
         (work / 'by-date').mkdir(parents=True, exist_ok=True)
 
-    stats = {'moved': 0, 'screenshots': 0, 'recordings': 0, 'photos': 0, 'videos': 0}
+    live_pairs = find_live_photo_pairs(files)
+    paired_paths = set(live_pairs.keys()) | set(live_pairs.values())
+    if live_pairs:
+        print(f"→ Detected {len(live_pairs)} Live Photo pair(s)")
+
+    stats = {
+        'moved': 0, 'screenshots': 0, 'recordings': 0,
+        'photos': 0, 'videos': 0, 'live_pairs': 0,
+    }
     total = len(files)
     start_time = time.time()
     last_report = start_time
 
     for i, f in enumerate(files, 1):
         try:
-            process_file(
-                work, f, events, args.source,
-                DEFAULT_SCREENSHOT_KEYWORDS, DEFAULT_RECORDING_KEYWORDS,
-                args.no_gps_rule,
-                args.dry_run, stats
-            )
+            if f in live_pairs:
+                process_live_pair(
+                    work, f, live_pairs[f], events, args.source,
+                    args.dry_run, stats,
+                )
+            elif f in paired_paths:
+                # Companion .mov handled with its still
+                pass
+            else:
+                process_file(
+                    work, f, events, args.source,
+                    DEFAULT_SCREENSHOT_KEYWORDS, DEFAULT_RECORDING_KEYWORDS,
+                    args.no_gps_rule,
+                    args.dry_run, stats
+                )
         except Exception as e:
             print(f"  [error] {f.relative_to(work)}: {e}", file=sys.stderr)
 
@@ -918,11 +2277,14 @@ def main():
     print(file=sys.stderr)
 
     prefix = '[dry-run] Would' if args.dry_run else '✓ Did'
-    print(f"\n{prefix} process {len(files)} files:")
+    print(f"\n{prefix} process {len(files)} inbox files:")
     print(f"  screenshots: {stats['screenshots']}")
     print(f"  recordings:  {stats['recordings']}")
     print(f"  photos:      {stats['photos']}")
     print(f"  videos:      {stats['videos']}")
+    print(f"  live_pairs:  {stats['live_pairs']}")
+    print('→ Tip: sync one theme with --rebucket-themes --theme <name> '
+          '(or --all for every theme)')
 
 
 if __name__ == '__main__':

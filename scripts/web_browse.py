@@ -5,7 +5,8 @@ web_browse.py - Local Flask-free HTTP server to browse by-date/ with thumbnails 
 Uses Python's built-in http.server (no Flask dep). Single file, single port.
 
 Usage:
-    ./web_browse.py --work /Volumes/Storage --host 0.0.0.0 --port 8765
+    ./web_browse.py --work /Volumes/Storage --port 8765
+    ./web_browse.py --work /Volumes/Storage --host 0.0.0.0 --port 8765  # LAN (explicit)
 """
 
 import argparse
@@ -15,6 +16,7 @@ import mimetypes
 import os
 import queue
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -27,11 +29,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_BACKUP_PREFIXES = ('/Volumes/WD4T/MediaVault', '/Volumes/YM/MediaVault')
 THUMB_CACHE = '_meta/thumbs'
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.hevc', '.webm'}
 RUN_TIMEOUT_SEC = None  # 不超时；长任务实质不限时
 # 仅当 RUN_TIMEOUT_SEC 为 None 时作为极长兜底；再设为 None 则完全无限
 RUN_HARD_CAP_SEC = 7 * 24 * 3600
+MAX_POST_BODY = 2 * 1024 * 1024  # 2 MiB
+MONTH_SEGMENT_RE = re.compile(r'^\d{4}-\d{2}(_[^/\\]+)?$')
+# Star bucket names: alnum / . _ - / CJK (theme dirs like 2026-07_海南)
+_STAR_BUCKET_SAFE_RE = re.compile(
+    r'^[A-Za-z0-9._\-\u3400-\u9fff\uf900-\ufaff]+$'
+)
 
 # Sibling scripts discovered at import time (so absolute paths are baked in)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -42,6 +51,44 @@ RENAME_SCRIPT = SCRIPT_DIR / 'rename_organize.py'
 SYNC_SCRIPT = SCRIPT_DIR / 'sync_to_backup.sh'
 INIT_SCRIPT = SCRIPT_DIR / 'init_storage.sh'
 BACKUP_DEFAULT = '/Volumes/WD4T/MediaVault'
+
+EMPTY_EVENTS_YAML = """# 主题配置（rename_organize / Web /themes）
+# 也可用：./scripts/add_theme.py --interactive
+#
+# 示例（复制下面块，去掉每行行首的「# 」后保存；文件夹会变成 by-date/2026/2026-07_海南/）：
+#
+# themes:
+#   - name: 海南
+#     # month 可省略：有 date_range.start 时自动 = 开始月；手写须与 start 同月
+#     date_range:
+#       start: 2026-07-10
+#       end: 2026-07-18
+#     sources:
+#       - iphone
+#       - canon
+#   # 跨月区间：桶名固定用开始月（1 月拍的也进 2025-12_…）
+#   # - name: 香港-深圳
+#   #   date_range:
+#   #     start: 2025-12-28
+#   #     end: 2026-01-05
+#   # 仅来源（当月只有一个主题时，命中 sources 的都进该桶；需写 month）：
+#   - name: 夏令营
+#     month: 2026-08
+#     sources: [iphone]
+#   # 或显式文件列表（优先级最高）：
+#   # - name: 重要证件照
+#   #   month: 2026-06
+#   #   files:
+#   #     - 20260601_100000_iphone_a3f2.heic
+#
+# 字段：name 必填；month(YYYY-MM) 有 start 时可省略；date_range / sources / files 至少其一
+# date_range 可跨月；主题桶 = by-date/<开始年>/<开始月>_<名>/
+# 保存后按主题同步：picvault theme rebucket --theme <名> （先 dry-run，再 --yes）
+# （只扫该主题；可迁出到其它主题；全量用 --all）
+# rename 只处理 inbox，不再自动全量同步主题
+
+themes: []
+"""
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -56,6 +103,8 @@ RUN_COMMANDS = {}
 # Single-user: at most one /api/run at a time
 _RUN_LOCK = threading.Lock()
 _ACTIVE_RUN = None  # dict meta or None
+_ACTIVE_PROC = None  # subprocess.Popen or None
+_CANCEL_REQUESTED = False
 
 _RUN_ID_RE = re.compile(r'^[\w\-]+$')
 
@@ -104,11 +153,13 @@ _PIPELINE_APPLY_CMDS = ('dedupe_apply', 'rename_apply', 'sync_apply')
 
 
 def pipeline_step_markers(work: Path) -> dict:
-    """Latest successful Apply markers for dashboard steps 02/03/04.
+    """Latest successful Apply markers for dashboard steps 02/03/05.
 
     Scans persisted run logs under runs_dir (excluding latest.json). For each
     apply command, keeps the newest status==ok entry by finished_at then id.
-    Also flags running=true when _ACTIVE_RUN matches that command.
+    A successful one-shot ``pipeline`` run marks all three apply steps done
+    (unless a newer individual apply exists for that step).
+    Also flags running=true when _ACTIVE_RUN matches that command or pipeline.
     """
     markers = {
         name: {
@@ -120,6 +171,7 @@ def pipeline_step_markers(work: Path) -> dict:
         for name in _PIPELINE_APPLY_CMDS
     }
     d = runs_dir(work)
+    best_pipeline = None  # (sort_key, meta)
     if d.is_dir():
         best = {}  # command_name -> (sort_key, meta)
         for path in d.glob('*.json'):
@@ -131,14 +183,18 @@ def pipeline_step_markers(work: Path) -> dict:
                 continue
             if not isinstance(meta, dict):
                 continue
-            cmd = meta.get('command_name')
-            if cmd not in markers:
-                continue
             if meta.get('status') != 'ok':
                 continue
+            cmd = meta.get('command_name')
             finished = meta.get('finished_at') or ''
             run_id = meta.get('id') or path.stem
             sort_key = (str(finished), str(run_id))
+            if cmd == 'pipeline':
+                if best_pipeline is None or sort_key > best_pipeline[0]:
+                    best_pipeline = (sort_key, meta)
+                continue
+            if cmd not in markers:
+                continue
             prev = best.get(cmd)
             if prev is None or sort_key > prev[0]:
                 best[cmd] = (sort_key, meta)
@@ -149,6 +205,19 @@ def pipeline_step_markers(work: Path) -> dict:
                 'finished_at': meta.get('finished_at'),
                 'id': meta.get('id'),
             }
+        if best_pipeline is not None:
+            pipe_key, pipe_meta = best_pipeline
+            for cmd in markers:
+                cur_finished = markers[cmd].get('finished_at') or ''
+                cur_id = markers[cmd].get('id') or ''
+                cur_key = (str(cur_finished), str(cur_id))
+                if not markers[cmd]['done'] or pipe_key >= cur_key:
+                    markers[cmd] = {
+                        'done': True,
+                        'running': False,
+                        'finished_at': pipe_meta.get('finished_at'),
+                        'id': pipe_meta.get('id'),
+                    }
 
     with _RUN_LOCK:
         active = dict(_ACTIVE_RUN) if _ACTIVE_RUN else None
@@ -156,6 +225,9 @@ def pipeline_step_markers(work: Path) -> dict:
         cmd = active.get('command_name')
         if cmd in markers:
             markers[cmd]['running'] = True
+        elif cmd == 'pipeline':
+            for name in markers:
+                markers[name]['running'] = True
 
     return markers
 
@@ -179,8 +251,103 @@ def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
     )
 
 
+def path_is_under(child: Path, root: Path) -> bool:
+    """True if resolved child is root or a descendant of root."""
+    try:
+        child_r = child.resolve()
+        root_r = root.resolve()
+    except OSError:
+        return False
+    return child_r == root_r or str(child_r).startswith(str(root_r) + os.sep)
+
+
+def safe_under_work(work: Path, rel: str):
+    """Resolve work/rel; return Path if it stays under work, else None.
+
+    Rejects empty, absolute, and any ``..`` path segments (same fence as /raw).
+    """
+    if not rel or not isinstance(rel, str):
+        return None
+    rel = rel.strip()
+    if not rel:
+        return None
+    p = Path(rel)
+    if p.is_absolute() or '..' in p.parts:
+        return None
+    if '\0' in rel:
+        return None
+    try:
+        full = (work / rel).resolve()
+    except OSError:
+        return None
+    if not path_is_under(full, work):
+        return None
+    return full
+
+
+def is_safe_star_bucket(bucket: str) -> bool:
+    """Reject path separators / traversal; allow alnum, ._- and CJK only."""
+    if not bucket or not isinstance(bucket, str):
+        return False
+    if len(bucket) > 200:
+        return False
+    if '/' in bucket or '\\' in bucket or '..' in bucket:
+        return False
+    return bool(_STAR_BUCKET_SAFE_RE.fullmatch(bucket))
+
+
+def resolve_stars_path(work: Path, bucket: str) -> Path:
+    """Build ``_meta/stars/{bucket}.json`` and require it stays under stars dir."""
+    if not is_safe_star_bucket(bucket):
+        raise ValueError('invalid bucket')
+    stars_dir = (work / '_meta' / 'stars').resolve()
+    path = (stars_dir / f'{bucket}.json').resolve()
+    if path.parent != stars_dir or not path_is_under(path, stars_dir):
+        raise ValueError('invalid bucket')
+    return path
+
+
+def is_safe_month_segment(month: str) -> bool:
+    """Month URL segment: YYYY-MM or YYYY-MM_<theme>; no separators / .."""
+    if not month or not isinstance(month, str):
+        return False
+    if '/' in month or '\\' in month or '..' in month:
+        return False
+    return bool(MONTH_SEGMENT_RE.fullmatch(month))
+
+
+def is_allowed_cors_origin(origin) -> bool:
+    """Allow missing Origin, file:// (null), and localhost / 127.0.0.1 / ::1."""
+    if origin is None or origin == '':
+        return True
+    if origin == 'null':
+        return True
+    try:
+        parsed = urllib.parse.urlparse(origin)
+    except Exception:
+        return False
+    if parsed.scheme not in ('http', 'https'):
+        return False
+    host = (parsed.hostname or '').lower()
+    return host in ('localhost', '127.0.0.1', '::1')
+
+
+def _is_jpeg_bytes(path: Path) -> bool:
+    """True if path starts with JPEG SOI marker (ffd8ff)."""
+    try:
+        with open(path, 'rb') as f:
+            return f.read(3) == b'\xff\xd8\xff'
+    except OSError:
+        return False
+
+
 def gen_thumbnail(src: Path, dst: Path, size=320) -> bool:
-    """Generate thumbnail: sips for images, ffmpeg frame extract for videos."""
+    """Generate thumbnail: sips for images, ffmpeg frame extract for videos.
+
+    Always write real JPEG bytes to dst (.jpg). Plain ``sips -Z`` keeps the
+    source format (HEIC/PNG), so renaming to .jpg leaves browsers unable to
+    decode the grid thumb — force ``-s format jpeg``.
+    """
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.suffix.lower() in VIDEO_EXTS:
@@ -207,17 +374,20 @@ def gen_thumbnail(src: Path, dst: Path, size=320) -> bool:
                     ],
                     capture_output=True, timeout=60,
                 )
-            return r.returncode == 0 and dst.exists()
+            return r.returncode == 0 and dst.exists() and _is_jpeg_bytes(dst)
 
         subprocess.run(
-            ['sips', '-Z', str(size), str(src), '--out', str(dst.parent)],
-            capture_output=True, check=True, timeout=30
+            [
+                'sips', '-s', 'format', 'jpeg', '-Z', str(size),
+                str(src), '--out', str(dst),
+            ],
+            capture_output=True, check=True, timeout=30,
         )
-        # sips preserves extension; we want .jpg
+        # Older sips / odd paths may still write src.name beside dst.
         produced = dst.parent / src.name
         if produced.exists() and produced != dst:
             shutil.move(str(produced), str(dst))
-        return dst.exists()
+        return dst.exists() and _is_jpeg_bytes(dst)
     except Exception as e:
         print(f"  [thumb] {src}: {e}", file=sys.stderr)
         return False
@@ -229,19 +399,88 @@ def thumb_for(file_path: Path, work: Path, thumb_root: Path) -> Path:
     thumb_path = thumb_root / rel.with_suffix('.jpg')
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
     if thumb_path.exists():
-        return thumb_path
+        if _is_jpeg_bytes(thumb_path):
+            return thumb_path
+        # Stale cache: HEIC/PNG bytes saved as .jpg (pre-format-jpeg fix).
+        try:
+            thumb_path.unlink()
+        except OSError:
+            pass
     if gen_thumbnail(file_path, thumb_path):
         return thumb_path
     return None
 
 
+_LIVE_STILL_EXTS = {'.heic', '.jpg', '.jpeg'}
+
+
+def is_live_companion_mov(path: Path) -> bool:
+    """True if path is a .mov sitting next to a same-stem still (Live Photo)."""
+    if path.suffix.lower() != '.mov':
+        return False
+    if not is_user_media_file(path):
+        return False
+    stem = path.stem
+    parent = path.parent
+    for ext in _LIVE_STILL_EXTS:
+        if (parent / f'{stem}{ext}').is_file():
+            return True
+    return False
+
+
+def is_live_photo_still(path: Path) -> bool:
+    """True if path is a still with a same-stem .mov companion (Live Photo)."""
+    if path.suffix.lower() not in _LIVE_STILL_EXTS:
+        return False
+    return (path.parent / f'{path.stem}.mov').is_file()
+
+
+def count_month_media(month_dir: Path) -> tuple[int, int, int]:
+    """Count (photos, videos, lives) for one by-date month bucket.
+
+    photos: user media under photos/, excluding Live companion .mov (gallery semantics).
+    videos: user media under videos/.
+    lives: Live Photo pairs (still with same-stem .mov); one unit each, not still+mov.
+    Uses filesystem stem pairing only — no EXIF.
+    """
+    photo_count = 0
+    live_count = 0
+    photos_dir = month_dir / 'photos'
+    if photos_dir.exists():
+        for f in photos_dir.rglob('*'):
+            if not is_user_media_file(f) or is_live_companion_mov(f):
+                continue
+            photo_count += 1
+            if is_live_photo_still(f):
+                live_count += 1
+    video_count = 0
+    videos_dir = month_dir / 'videos'
+    if videos_dir.exists():
+        video_count = sum(
+            1 for f in videos_dir.rglob('*') if is_user_media_file(f)
+        )
+    return photo_count, video_count, live_count
+
+
+def format_ledger_stats(photos: int, videos: int,
+                        stars: int = 0, lives: int = 0) -> str:
+    """Chinese ledger-stats line; omit zero star/Live to keep rows readable."""
+    parts = [f'{photos} 张', f'{videos} 视频']
+    if stars:
+        parts.append(f'{stars} 加星')
+    if lives:
+        parts.append(f'{lives} Live')
+    return ' · '.join(parts)
+
+
 def scan_buckets(work: Path) -> dict:
-    """Scan by-date/, screenshots/, screenrecords/, docs/ for bucket info."""
+    """Scan by-date/, screenshots/, screenrecords/, docs/, things/ for bucket info."""
     result = {
         'years': {},
         'screenshots_count': 0,
         'screenrecords_count': 0,
         'docs_count': 0,
+        'things_count': 0,
     }
 
     by_date = work / 'by-date'
@@ -254,12 +493,9 @@ def scan_buckets(work: Path) -> dict:
             for month_dir in sorted(year_dir.iterdir()):
                 if not month_dir.is_dir():
                     continue
-                # Count files
-                photo_count = sum(1 for _ in (month_dir / 'photos').rglob('*')
-                                  if _.is_file()) if (month_dir / 'photos').exists() else 0
-                video_count = sum(1 for _ in (month_dir / 'videos').rglob('*')
-                                  if _.is_file()) if (month_dir / 'videos').exists() else 0
-                # Determine if themed
+                photo_count, video_count, live_count = count_month_media(month_dir)
+                # Stars JSON is keyed by month bucket name (e.g. 2024-07_海南).
+                star_count = len(load_stars(work, month_dir.name))
                 is_themed = '_' in month_dir.name
                 theme_name = month_dir.name.split('_', 1)[1] if is_themed else ''
                 months.append({
@@ -268,26 +504,40 @@ def scan_buckets(work: Path) -> dict:
                     'theme': theme_name,
                     'photos': photo_count,
                     'videos': video_count,
+                    'stars': star_count,
+                    'lives': live_count,
                 })
             result['years'][year] = months
 
     screenshots = work / 'screenshots'
     if screenshots.exists():
-        result['screenshots_count'] = sum(1 for f in screenshots.iterdir() if f.is_file())
+        result['screenshots_count'] = sum(
+            1 for f in screenshots.iterdir() if is_user_media_file(f)
+        )
     screenrecords = work / 'screenrecords'
     if screenrecords.exists():
         result['screenrecords_count'] = sum(
-            1 for f in screenrecords.iterdir() if f.is_file()
+            1 for f in screenrecords.iterdir() if is_user_media_file(f)
         )
     docs = work / 'docs'
     if docs.exists():
-        result['docs_count'] = sum(1 for f in docs.iterdir() if f.is_file())
+        result['docs_count'] = sum(
+            1 for f in docs.iterdir() if is_user_media_file(f)
+        )
+    things = work / 'things'
+    if things.exists():
+        result['things_count'] = sum(
+            1 for f in things.iterdir() if is_user_media_file(f)
+        )
 
     return result
 
-
 def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Path]:
-    """List files in a specific month/theme bucket."""
+    """List files in a specific month/theme bucket.
+
+    Live Photo companion .mov files (same stem as a still in photos/) are
+    omitted so the gallery shows one cell per Live Photo.
+    """
     month_dir = work / 'by-date' / year / month
     if not month_dir.exists():
         return []
@@ -295,7 +545,8 @@ def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Pa
     for bucket_type in ('photos', 'videos'):
         sub = month_dir / bucket_type
         if sub.exists():
-            files.extend(f for f in sub.rglob('*') if f.is_file())
+            files.extend(f for f in sub.rglob('*') if is_user_media_file(f))
+    files = [f for f in files if not is_live_companion_mov(f)]
     return sorted(files)
 
 
@@ -303,7 +554,7 @@ def list_screenshots(work: Path) -> list[Path]:
     screenshots = work / 'screenshots'
     if not screenshots.exists():
         return []
-    return sorted([f for f in screenshots.iterdir() if f.is_file()],
+    return sorted([f for f in screenshots.iterdir() if is_user_media_file(f)],
                   key=lambda f: f.stat().st_mtime, reverse=True)
 
 
@@ -311,7 +562,7 @@ def list_screenrecords(work: Path) -> list[Path]:
     screenrecords = work / 'screenrecords'
     if not screenrecords.exists():
         return []
-    return sorted([f for f in screenrecords.iterdir() if f.is_file()],
+    return sorted([f for f in screenrecords.iterdir() if is_user_media_file(f)],
                   key=lambda f: f.stat().st_mtime, reverse=True)
 
 
@@ -319,7 +570,15 @@ def list_docs(work: Path) -> list[Path]:
     docs = work / 'docs'
     if not docs.exists():
         return []
-    return sorted([f for f in docs.iterdir() if f.is_file()],
+    return sorted([f for f in docs.iterdir() if is_user_media_file(f)],
+                  key=lambda f: f.stat().st_mtime, reverse=True)
+
+
+def list_things(work: Path) -> list[Path]:
+    things = work / 'things'
+    if not things.exists():
+        return []
+    return sorted([f for f in things.iterdir() if is_user_media_file(f)],
                   key=lambda f: f.stat().st_mtime, reverse=True)
 
 
@@ -345,7 +604,10 @@ def list_all_starred(work: Path) -> list[tuple]:
 
 def load_stars(work: Path, bucket: str) -> dict:
     """Load stars JSON, returning dict {rel_path: True}."""
-    path = work / '_meta' / 'stars' / f"{bucket}.json"
+    try:
+        path = resolve_stars_path(work, bucket)
+    except ValueError:
+        return {}
     if not path.exists():
         return {}
     try:
@@ -358,7 +620,7 @@ def load_stars(work: Path, bucket: str) -> dict:
 
 
 def save_stars(work: Path, bucket: str, stars: dict):
-    path = work / '_meta' / 'stars' / f"{bucket}.json"
+    path = resolve_stars_path(work, bucket)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({k: True for k in stars}, indent=2, ensure_ascii=False))
 
@@ -456,10 +718,7 @@ def trash_paths(work: Path, paths: list) -> list:
     return results
 
 
-# —— Browse UI (contact-sheet gallery) ————————————————————————————————
-# Shares visual language with outputs/dashboard.html: Syne / Figtree /
-# JetBrains Mono, cool slate-cyan archive palette. Signature: contact-sheet
-# frames with cyan top rail + amber star notch.
+# —— Browse UI (aligned with dashboard: pure white / black / soft gray) ——
 
 
 def _esc(s) -> str:
@@ -468,125 +727,189 @@ def _esc(s) -> str:
 
 PAGE_CSS = '''
 :root {
-  --paper: #C8D0D8;
-  --ink: #15202B;
-  --cyan: #178A9C;
-  --amber: #C48A1A;
-  --live: #1F7A4D;
-  --rail: #E8EEF2;
-  --muted: #5A6A78;
-  --sheet: #B8C2CC;
-  --frame: #DCE3E9;
+  --paper: #FAFAF8;
+  --mist: #F0EFEC;
+  --ink: #141414;
+  --muted: #7A7872;
+  --line: #E4E2DC;
+  --live: #2F6F4E;
+  --warn: #9A6B1F;
+  --hazard: #9B2C2C;
+  --bg: var(--paper);
+  --soft: var(--mist);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Figtree", sans-serif;
+  font-family: "IBM Plex Sans", sans-serif;
   color: var(--ink);
   line-height: 1.5;
-  background-color: var(--paper);
-  background-image:
-    radial-gradient(rgba(21,32,43,0.045) 0.6px, transparent 0.6px),
-    repeating-linear-gradient(-28deg, transparent 0, transparent 11px, rgba(21,32,43,0.028) 11px, rgba(21,32,43,0.028) 12px);
-  background-size: 4px 4px, auto;
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
 }
-a { color: var(--cyan); text-decoration: none; }
+a { color: var(--ink); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
-:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
-.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 28px 28px 72px; }
 
-.masthead {
+.brand-mark {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(1.7rem, 3vw, 2.15rem);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  flex-shrink: 0;
+  line-height: 0.95;
+}
+.brand-mark:hover { text-decoration: none; opacity: 0.7; }
+
+.topbar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px 24px;
-  align-items: end;
-  padding-bottom: 20px;
-  border-bottom: 1px solid rgba(21,32,43,0.18);
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
   margin-bottom: 28px;
 }
-.brand {
-  font-family: "Syne", sans-serif;
-  font-weight: 800;
-  font-size: clamp(1.9rem, 5vw, 2.8rem);
-  line-height: 0.95;
-  letter-spacing: -0.03em;
-  margin: 0;
-  color: var(--ink);
+.topbar-center {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  text-align: center;
 }
-.brand a { color: inherit; text-decoration: none; }
-.brand a:hover { color: var(--cyan); text-decoration: none; }
-.tagline { margin: 8px 0 0; font-size: 0.92rem; color: var(--muted); max-width: 40em; }
-.work-path {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
-  color: var(--muted);
-  text-align: right;
-  word-break: break-all;
-  max-width: 28em;
-}
-
-.nav {
+.crumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 4px;
-  margin: -12px 0 28px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(21,32,43,0.1);
+  align-items: center;
+  justify-content: center;
+  gap: 4px 2px;
+  min-width: 0;
 }
-.nav a, .nav span {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  padding: 5px 10px;
-  border: 1px solid transparent;
-  border-radius: 2px;
+.crumbs a, .crumbs span {
+  font-size: 0.82rem;
   color: var(--muted);
   text-decoration: none;
+  padding: 2px 4px;
 }
-.nav a:hover {
+.crumbs a:hover { color: var(--ink); text-decoration: none; background: var(--mist); }
+.crumbs a.here { color: var(--ink); font-weight: 500; }
+.crumbs .sep { color: var(--line); user-select: none; padding: 2px 0; }
+
+.jumps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.jumps a, .jumps-more > summary {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+}
+.jumps a:hover { color: var(--ink); text-decoration: none; }
+.jumps a .n {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.jumps a#consoleLink { font-weight: 500; color: var(--ink); }
+.jumps-more {
+  position: relative;
+}
+.jumps-more > summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 500;
+  padding: 2px 0;
+  user-select: none;
+}
+.jumps-more > summary::-webkit-details-marker { display: none; }
+.jumps-more > summary:hover { color: var(--ink); }
+.jumps-more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  min-width: 10.5rem;
+  padding: 8px 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 28px rgba(20,20,20,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.jumps-more-panel a {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 14px;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.jumps-more-panel a:hover {
+  background: var(--mist);
   color: var(--ink);
-  border-color: rgba(21,32,43,0.2);
-  background: var(--rail);
   text-decoration: none;
 }
-.nav a.here {
-  color: var(--ink);
-  border-color: rgba(23,138,156,0.45);
-  background: rgba(23,138,156,0.1);
+
+.work-path {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  color: var(--muted);
+  word-break: break-all;
+  margin: 0;
+  letter-spacing: 0.01em;
+  max-width: 36em;
 }
-.nav .sep { color: rgba(21,32,43,0.25); padding: 5px 2px; user-select: none; }
 
 .page-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px 20px;
-  margin-bottom: 18px;
+  gap: 12px 24px;
+  margin-bottom: 22px;
 }
 .page-title {
-  font-family: "Syne", sans-serif;
-  font-weight: 800;
-  font-size: clamp(1.5rem, 3.5vw, 2.1rem);
-  letter-spacing: -0.02em;
+  font-family: "Instrument Serif", serif;
+  font-weight: 400;
+  font-size: clamp(1.85rem, 3.5vw, 2.55rem);
+  letter-spacing: -0.025em;
   margin: 0;
-  line-height: 1.1;
+  line-height: 1.05;
+  color: var(--ink);
+}
+.page-lede {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+  max-width: 36em;
 }
 .page-meta {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.75rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
   color: var(--muted);
+  letter-spacing: 0.02em;
 }
 .section-label {
-  font-family: "JetBrains Mono", monospace;
   font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-weight: 500;
   color: var(--muted);
-  margin: 0 0 12px;
+  margin: 0 0 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .toolbar {
@@ -594,191 +917,246 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  background: var(--mist);
+  border: none;
+  border-radius: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .toolbar .count {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.75rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
   color: var(--muted);
   margin-right: auto;
+  letter-spacing: 0.02em;
 }
-.chip {
-  font-family: "Figtree", sans-serif;
-  font-weight: 600;
-  font-size: 0.8rem;
-  padding: 5px 11px;
-  border: 1px solid rgba(21,32,43,0.28);
-  border-radius: 2px;
-  background: var(--rail);
-  color: var(--ink);
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
+.toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 }
-.chip:hover { border-color: var(--cyan); }
-.chip.on {
-  background: var(--cyan);
-  border-color: var(--cyan);
+.toolbar-organize {
+  display: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  width: 100%;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
+body.select-mode .toolbar-organize { display: flex; }
+#selectModeBtn.on {
+  background: var(--ink);
   color: #fff;
 }
-.chip.on .n { color: rgba(255,255,255,0.85); }
+.chip {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.chip:hover { background: var(--paper); }
+.chip.on {
+  background: var(--ink);
+  color: #fff;
+}
+.chip.on .n { color: rgba(255,255,255,0.75); }
 .chip .n {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
   color: var(--muted);
   margin-left: 4px;
 }
 .btn-reclass {
-  font-family: "Figtree", sans-serif;
-  font-weight: 600;
-  font-size: 0.8rem;
-  padding: 5px 11px;
-  border: 1px solid rgba(21,32,43,0.28);
-  border-radius: 2px;
-  background: var(--paper);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--ink);
   cursor: pointer;
+  transition: background .12s;
 }
-.btn-reclass:hover { border-color: var(--cyan); color: var(--cyan); }
-.btn-reclass:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
+.btn-reclass:hover { background: var(--paper); }
+.btn-reclass:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-trash {
-  font-family: "Figtree", sans-serif;
-  font-weight: 600;
-  font-size: 0.8rem;
-  padding: 5px 11px;
-  border: 1px solid rgba(168,52,40,0.45);
-  border-radius: 2px;
-  background: rgba(168,52,40,0.08);
-  color: #A83428;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  border: 1px solid var(--hazard);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hazard);
   cursor: pointer;
+  transition: background .12s, color .12s;
 }
-.btn-trash:hover { background: rgba(168,52,40,0.16); }
-.btn-trash:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
+.btn-trash:hover { background: var(--hazard); color: #fff; }
+.btn-trash:disabled { opacity: 0.4; cursor: not-allowed; }
 .sel-count {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
-  color: var(--cyan);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  color: var(--ink);
   min-width: 4.5em;
 }
 
-/* Year / month ledger */
 .ledger {
-  border: 1px solid rgba(21,32,43,0.22);
-  border-top: 3px solid var(--cyan);
-  background: rgba(232,238,242,0.55);
+  border-top: 1px solid var(--line);
+  background: transparent;
+  overflow: hidden;
 }
 .ledger-row {
   display: grid;
-  grid-template-columns: minmax(5.5em, auto) 1fr auto;
+  grid-template-columns: minmax(5.5em, auto) 1fr auto auto;
   gap: 10px 18px;
   align-items: baseline;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(21,32,43,0.12);
+  padding: 18px 4px;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+  transition: background .12s;
+}
+.ledger-row:hover {
+  background: rgba(240, 239, 236, 0.55);
+  text-decoration: none;
+}
+.ledger-row:hover .ledger-key { font-weight: 400; letter-spacing: -0.03em; }
+.ledger-row > a.ledger-key {
   text-decoration: none;
   color: inherit;
 }
-.ledger-row:last-child { border-bottom: none; }
-.ledger-row:hover {
-  background: rgba(23,138,156,0.08);
-  text-decoration: none;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .ledger-row {
-    animation: frameIn .4s ease forwards;
-  }
-  .ledger-row:nth-child(1) { animation-delay: .04s; }
-  .ledger-row:nth-child(2) { animation-delay: .08s; }
-  .ledger-row:nth-child(3) { animation-delay: .12s; }
-  .ledger-row:nth-child(4) { animation-delay: .16s; }
-  .ledger-row:nth-child(5) { animation-delay: .2s; }
-  .ledger-row:nth-child(6) { animation-delay: .24s; }
-  .ledger-row:nth-child(7) { animation-delay: .28s; }
-  .ledger-row:nth-child(8) { animation-delay: .32s; }
-}
 .ledger-key {
-  font-family: "Syne", sans-serif;
-  font-weight: 800;
-  font-size: 1.25rem;
-  letter-spacing: -0.02em;
+  font-family: "Instrument Serif", serif;
+  font-weight: 400;
+  font-size: 1.55rem;
+  letter-spacing: -0.025em;
   color: var(--ink);
+  transition: letter-spacing .12s ease;
 }
-.ledger-sub {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-.ledger-sub .theme {
-  color: var(--cyan);
-  font-weight: 600;
-}
+.ledger-sub { font-size: 0.9rem; color: var(--muted); }
+.ledger-sub .theme { color: var(--ink); font-weight: 500; }
 .ledger-stats {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 0.72rem;
-  color: var(--muted);
+  color: #55534E;
   text-align: right;
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
+.ledger-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+.ledger-sync {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 4px 8px;
+  cursor: pointer;
+  line-height: 1.2;
+  opacity: 0;
+  transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+}
+.ledger-row:hover .ledger-sync,
+.ledger-sync:focus-visible {
+  opacity: 1;
+  border-color: var(--line);
+}
+.ledger-sync:hover,
+.ledger-sync:focus-visible {
+  color: var(--ink);
+  border-color: #c8c5be;
+}
+@media (hover: none) {
+  .ledger-sync { opacity: 0.85; border-color: var(--line); }
+}
+.ledger-go {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 1.15rem;
+  color: #55534E;
+  opacity: 0.75;
+  line-height: 1;
+  transition: color .12s ease, transform .12s ease, opacity .12s ease;
+  justify-self: end;
+}
+.ledger-row:hover .ledger-go { color: var(--ink); opacity: 1; transform: translateX(2px); }
 .ledger-empty {
-  padding: 28px 16px;
+  padding: 48px 8px;
   color: var(--muted);
   font-size: 0.95rem;
+  text-align: left;
+  max-width: 28em;
 }
 
-/* Contact sheet */
 .sheet {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 0;
-  border: 1px solid rgba(21,32,43,0.22);
-  border-top: 3px solid var(--cyan);
-  background: var(--sheet);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px 12px;
 }
 .cell {
   position: relative;
-  background: var(--frame);
-  border-right: 1px solid rgba(21,32,43,0.14);
-  border-bottom: 1px solid rgba(21,32,43,0.14);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+}
+.cell:hover .thumb,
+.cell:hover .thumb-miss {
+  outline: 1px solid var(--ink);
+  outline-offset: 0;
 }
 .cell.hidden { display: none; }
-.cell.starred { box-shadow: inset 0 0 0 2px rgba(196,138,26,0.55); }
-.cell.selected { box-shadow: inset 0 0 0 2px rgba(23,138,156,0.7); }
-.cell.starred.selected { box-shadow: inset 0 0 0 2px rgba(196,138,26,0.55), inset 0 0 0 4px rgba(23,138,156,0.55); }
+.cell.starred .thumb,
+.cell.starred .thumb-miss {
+  outline: 1px solid rgba(154,107,31,0.85);
+  outline-offset: 0;
+}
+.cell.selected .thumb,
+.cell.selected .thumb-miss {
+  outline: 2px solid var(--ink);
+  outline-offset: 0;
+}
 .cell .pick {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 10px;
+  left: 10px;
   z-index: 3;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   margin: 0;
-  accent-color: var(--cyan);
+  accent-color: var(--ink);
   cursor: pointer;
+  opacity: 0.9;
+  display: none;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .cell { animation: frameIn .45s ease forwards; }
-  .cell:nth-child(6n+1) { animation-delay: .03s; }
-  .cell:nth-child(6n+2) { animation-delay: .06s; }
-  .cell:nth-child(6n+3) { animation-delay: .09s; }
-  .cell:nth-child(6n+4) { animation-delay: .12s; }
-  .cell:nth-child(6n+5) { animation-delay: .15s; }
-  .cell:nth-child(6n+6) { animation-delay: .18s; }
-}
-
-@keyframes frameIn {
-  from { transform: translateY(8px); }
-  to { transform: translateY(0); }
-}
-
+body.select-mode .cell .pick { display: block; }
+body.select-mode .cell .star { opacity: 0.55; }
+body.select-mode .cell:hover .star,
+body.select-mode .star.on { opacity: 1; }
 .cell .thumb {
   display: block;
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
-  background: #9AA6B2;
+  background: var(--mist);
   cursor: zoom-in;
   vertical-align: middle;
 }
@@ -787,9 +1165,9 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   align-items: center;
   justify-content: center;
   aspect-ratio: 1;
-  background: #9AA6B2;
-  color: var(--ink);
-  font-family: "JetBrains Mono", monospace;
+  background: var(--mist);
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
   font-size: 0.7rem;
   text-decoration: none;
 }
@@ -797,22 +1175,22 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 6px 8px 7px;
-  background: rgba(232,238,242,0.85);
-  border-top: 1px solid rgba(21,32,43,0.1);
+  gap: 8px;
+  padding: 8px 2px 0;
+  background: transparent;
+  border-top: none;
 }
 .cell .idx {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 0.62rem;
-  letter-spacing: 0.06em;
   color: var(--muted);
   flex-shrink: 0;
+  letter-spacing: 0.04em;
 }
 .cell .fname {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.62rem;
-  color: var(--ink);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.72rem;
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -820,63 +1198,64 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .cell .badge {
   position: absolute;
-  left: 8px;
+  left: 10px;
   top: auto;
-  bottom: 34px; /* above .edge filename strip */
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
+  bottom: 36px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   padding: 2px 5px;
-  background: rgba(21,32,43,0.72);
+  background: rgba(20,20,20,0.72);
   color: #fff;
-  border-radius: 2px;
   pointer-events: none;
   z-index: 2;
 }
 .star {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(21,32,43,0.35);
-  border-radius: 2px;
-  background: rgba(232,238,242,0.92);
-  color: var(--muted);
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 0;
+  background: rgba(20,20,20,0.18);
+  color: rgba(255,255,255,0.88);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
   display: grid;
   place-items: center;
   padding: 0;
-  transition: background .15s, color .15s, border-color .15s, transform .15s;
+  transition: color .12s, background .12s, opacity .12s, transform .12s;
   z-index: 2;
+  opacity: 0.72;
 }
-.star:hover {
-  border-color: var(--amber);
-  color: var(--amber);
-  transform: scale(1.06);
-}
+.cell:hover .star,
+.star.on,
+.star:focus-visible { opacity: 1; }
+.star:hover { color: #fff; background: rgba(20,20,20,0.35); }
 .star.on {
-  background: var(--amber);
-  border-color: var(--amber);
-  color: #1a1408;
+  background: var(--warn);
+  color: #fff;
+  text-shadow: none;
+  opacity: 1;
 }
 .star.busy { opacity: 0.55; pointer-events: none; }
 .star.pulse { animation: starPulse .35s ease; }
 @keyframes starPulse {
   0% { transform: scale(1); }
-  40% { transform: scale(1.18); }
+  40% { transform: scale(1.12); }
   100% { transform: scale(1); }
 }
 
-/* Lightbox */
 .lb {
   display: none;
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(21,32,43,0.88);
+  background: rgba(20,20,20,0.94);
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -884,24 +1263,22 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .lb.open { display: flex; }
 .lb img, .lb video {
   max-width: min(96vw, 1200px);
-  max-height: 88vh;
+  max-height: 86vh;
   object-fit: contain;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.45);
 }
 .lb-bar {
   position: fixed;
-  bottom: 18px;
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   gap: 8px;
   align-items: center;
-  background: rgba(232,238,242,0.95);
-  border: 1px solid rgba(21,32,43,0.25);
-  border-radius: 2px;
-  padding: 8px 12px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
+  background: var(--paper);
+  border: none;
+  padding: 10px 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
   color: var(--ink);
   max-width: 90vw;
 }
@@ -911,32 +1288,31 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   white-space: nowrap;
   max-width: 48vw;
 }
-.lb-bar button {
-  font-family: "Figtree", sans-serif;
-  font-weight: 600;
-  font-size: 0.8rem;
+.lb-bar button,
+.lb-bar a {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.78rem;
   padding: 4px 10px;
-  border: 1px solid rgba(21,32,43,0.28);
-  border-radius: 2px;
-  background: var(--rail);
+  border: none;
+  background: transparent;
   color: var(--ink);
   cursor: pointer;
+  text-decoration: none;
 }
-.lb-bar button:hover { border-color: var(--cyan); }
-.lb-bar .star-lb.on {
-  background: var(--amber);
-  border-color: var(--amber);
-}
+.lb-bar button:hover,
+.lb-bar a:hover { background: var(--mist); }
+.lb-bar .star-lb { opacity: 1; color: var(--muted); text-shadow: none; position: static; width: auto; height: auto; }
+.lb-bar .star-lb.on { background: var(--warn); color: #fff; }
 
 .toast {
   position: fixed;
   bottom: 20px;
   right: 20px;
   background: var(--ink);
-  color: var(--rail);
+  color: #fff;
   font-size: 0.85rem;
   padding: 10px 14px;
-  border-radius: 2px;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity .2s, transform .2s;
@@ -947,27 +1323,143 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .pre-block {
   margin: 0;
-  padding: 16px;
-  background: rgba(232,238,242,0.7);
-  border: 1px solid rgba(21,32,43,0.18);
-  border-top: 3px solid var(--cyan);
-  font-family: "JetBrains Mono", monospace;
+  padding: 18px;
+  background: var(--mist);
+  border: none;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 0.78rem;
   overflow-x: auto;
   white-space: pre-wrap;
   color: var(--ink);
 }
 
+.events-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+.events-fold {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.events-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  user-select: none;
+  padding: 4px 0;
+}
+.events-fold > summary::-webkit-details-marker { display: none; }
+.events-fold > summary::before {
+  content: '›';
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+.events-fold[open] > summary::before { transform: rotate(90deg); }
+.events-fold > summary:hover { color: var(--ink); }
+.events-fold .events-editor { margin-top: 12px; }
+.events-editor textarea {
+  width: 100%;
+  min-height: 280px;
+  max-height: 55vh;
+  box-sizing: border-box;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: var(--mist);
+  color: var(--ink);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+.events-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.events-toolbar button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.events-toolbar button.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.events-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.events-hint {
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 40em;
+}
+.events-hint.err { color: var(--hazard); }
+.events-fold-note {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 42em;
+}
+.events-status {
+  font-size: 0.82rem;
+  min-height: 1.2em;
+  color: var(--muted);
+}
+.events-status.ok { color: var(--live); }
+.events-status.err { color: var(--hazard); }
+@media (prefers-reduced-motion: reduce) {
+  .events-fold > summary::before { transition: none; }
+}
+
+.page-in {
+  animation: pageIn 0.36s ease both;
+}
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (max-width: 640px) {
-  .masthead { grid-template-columns: 1fr; }
-  .work-path { text-align: left; max-width: none; }
-  .ledger-row { grid-template-columns: 1fr; gap: 4px; }
+  .wrap { padding: 20px 16px 56px; }
+  .topbar {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+  .topbar-center { align-items: flex-start; text-align: left; }
+  .crumbs { justify-content: flex-start; }
+  .jumps { justify-content: flex-start; }
+  .ledger-row { grid-template-columns: 1fr auto; gap: 4px 10px; }
+  .ledger-sub { grid-column: 1 / -1; }
   .ledger-stats { text-align: left; white-space: normal; }
-  .sheet { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .ledger-go { grid-row: 1; grid-column: 2; }
+  .sheet { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px 10px; }
+  .star { opacity: 0.92; }
 }
 @media (prefers-reduced-motion: reduce) {
   .star.pulse { animation: none; }
+  .page-in { animation: none; }
   html { scroll-behavior: auto; }
+  .chip, .btn-reclass, .btn-trash, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
 '''
 
@@ -989,7 +1481,11 @@ PAGE_JS = '''
   async function toggleStar(btn) {
     var path = btn.getAttribute('data-path');
     var bucket = btn.getAttribute('data-bucket');
-    if (!path || !bucket || btn.classList.contains('busy')) return;
+    if (!path || !bucket) {
+      toast('加星失败：缺少路径');
+      return;
+    }
+    if (btn.classList.contains('busy')) return;
     btn.classList.add('busy');
     try {
       var r = await fetch('/api/star', {
@@ -1002,15 +1498,12 @@ PAGE_JS = '''
         toast('加星失败：' + (data.error || 'unknown'));
         return;
       }
-      setStarred(btn, data.starred);
+      // Sync gallery cell + lightbox bar for the same path (lightbox is outside .cell).
+      applyStarState(path, data.starred);
       btn.classList.add('pulse');
       setTimeout(function () { btn.classList.remove('pulse'); }, 350);
       syncStarCount();
       applyFilter();
-      var lbStar = document.querySelector('.star-lb');
-      if (lbStar && lbStar.getAttribute('data-path') === path) {
-        setStarred(lbStar, data.starred);
-      }
     } catch (err) {
       toast('网络错误：' + err);
     } finally {
@@ -1027,6 +1520,12 @@ PAGE_JS = '''
     if (cell) cell.classList.toggle('starred', !!on);
   }
 
+  function applyStarState(path, on) {
+    if (!path) return;
+    var sel = '.star[data-path="' + CSS.escape(path) + '"]';
+    document.querySelectorAll(sel).forEach(function (b) { setStarred(b, on); });
+  }
+
   function syncStarCount() {
     var n = document.querySelectorAll('.cell.starred').length;
     var el = document.getElementById('starCount');
@@ -1035,6 +1534,24 @@ PAGE_JS = '''
     if (chipN) chipN.textContent = String(n);
     var meta = document.getElementById('pageMetaStars');
     if (meta) meta.textContent = String(n);
+  }
+
+  function setSelectMode(on) {
+    document.body.classList.toggle('select-mode', !!on);
+    var btn = document.getElementById('selectModeBtn');
+    if (btn) {
+      btn.classList.toggle('on', !!on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = on ? '完成选择' : '选择';
+    }
+    if (!on) {
+      document.querySelectorAll('.cell.selected').forEach(function (cell) {
+        cell.classList.remove('selected');
+        var pick = cell.querySelector('.pick');
+        if (pick) pick.checked = false;
+      });
+    }
+    syncSelCount();
   }
 
   function syncSelCount() {
@@ -1056,15 +1573,20 @@ PAGE_JS = '''
   async function reclassify(action) {
     var paths = selectedPaths();
     if (!paths.length) {
-      toast('请先勾选文件');
+      toast('请先点「选择」，再勾选文件');
       return;
     }
     var label = ({
       to_screen: '移至截图录屏',
       to_normal: '移回普通分类',
-      to_docs: '移至文档'
+      to_docs: '移至文档',
+      to_things: '移至物品',
+      to_default_month: '放回默认月桶'
     })[action] || action;
-    if (!confirm(label + '：' + paths.length + ' 个文件？\\n会按规则重命名并移动。')) return;
+    var hint = action === 'to_default_month'
+      ? '按文件名日期移到 by-date/YYYY-MM/（默认月桶，不进主题）。'
+      : '会按规则重命名并移动。';
+    if (!confirm(label + '：' + paths.length + ' 个文件？\\n' + hint)) return;
     try {
       var r = await fetch('/api/reclassify', {
         method: 'POST',
@@ -1087,7 +1609,7 @@ PAGE_JS = '''
   async function trashSelected() {
     var paths = selectedPaths();
     if (!paths.length) {
-      toast('请先勾选文件');
+      toast('请先点「选择」，再勾选文件');
       return;
     }
     if (!confirm('移至回收站：' + paths.length + ' 个文件？\\n\\n• 会移到 _trash/（可找回，不是永久删除）\\n• 不会同步到备份盘')) return;
@@ -1133,6 +1655,11 @@ PAGE_JS = '''
       toggleStar(star);
       return;
     }
+    if (e.target.closest('[data-select-toggle]')) {
+      e.preventDefault();
+      setSelectMode(!document.body.classList.contains('select-mode'));
+      return;
+    }
     if (e.target.closest('.pick')) {
       e.stopPropagation();
       return;
@@ -1169,8 +1696,54 @@ PAGE_JS = '''
     }
   });
 
+  function isTypingTarget(el) {
+    if (!el || el === document || el === document.body) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
+  function visibleLightboxThumbs() {
+    // Gallery order; skip filter-hidden cells (Live companion MOVs are already omitted server-side).
+    return Array.prototype.slice.call(
+      document.querySelectorAll('.cell:not(.hidden) [data-lightbox]')
+    );
+  }
+
+  function stepLightbox(dir) {
+    if (!lb || !lb.classList.contains('open')) return;
+    var items = visibleLightboxThumbs();
+    if (!items.length) return;
+    var curPath = '';
+    var starBtn = lb.querySelector('.star-lb');
+    if (starBtn) curPath = starBtn.getAttribute('data-path') || '';
+    var idx = -1;
+    for (var i = 0; i < items.length; i++) {
+      if ((items[i].getAttribute('data-path') || '') === curPath) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) idx = 0;
+    else idx = (idx + dir + items.length) % items.length; // wrap around
+    openLightbox(items[idx]);
+  }
+
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeLightbox();
+    if (isTypingTarget(e.target)) return;
+    if (e.key === 'Escape') {
+      closeLightbox();
+      return;
+    }
+    if (!lb || !lb.classList.contains('open')) return;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      stepLightbox(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      stepLightbox(1);
+    }
   });
 
   var lb = null;
@@ -1210,7 +1783,10 @@ PAGE_JS = '''
     var starBtn = lb.querySelector('.star-lb');
     starBtn.setAttribute('data-path', path);
     starBtn.setAttribute('data-bucket', bucket);
-    var cellStar = document.querySelector('.star[data-path="' + CSS.escape(path) + '"]');
+    // Prefer gallery cell star (exclude .star-lb) so reopening reflects persisted UI state.
+    var cellStar = document.querySelector(
+      '.cell .star[data-path="' + CSS.escape(path) + '"]'
+    );
     setStarred(starBtn, cellStar ? cellStar.classList.contains('on') : false);
     lb.classList.add('open');
   }
@@ -1225,27 +1801,71 @@ PAGE_JS = '''
 
 
 def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) -> bytes:
-    """Wrap page body in shared masthead / nav / assets."""
+    """Wrap page body in shared topbar / assets."""
     crumbs = crumbs or [('首页', '/')]
-    nav_parts = []
+    crumb_parts = []
     for i, (label, href) in enumerate(crumbs):
         if i:
-            nav_parts.append('<span class="sep">/</span>')
+            crumb_parts.append('<span class="sep">/</span>')
         if href and i < len(crumbs) - 1:
-            nav_parts.append(f'<a href="{_esc(href)}">{_esc(label)}</a>')
+            crumb_parts.append(f'<a href="{_esc(href)}">{_esc(label)}</a>')
         else:
-            nav_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
-    # Always expose Screenshots + Themes as secondary jumps
-    nav_parts.append('<span class="sep">·</span>')
-    nav_parts.append('<a href="/starred">加星</a>')
-    nav_parts.append('<a href="/screenshots">截图</a>')
-    nav_parts.append('<a href="/screenrecords">录屏</a>')
-    nav_parts.append('<a href="/docs">文档</a>')
-    nav_parts.append('<a href="/themes">主题</a>')
+            crumb_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
+
+    # Counts for top jumps (avoid repeating a footer link dump on home)
+    star_n = shots_n = records_n = docs_n = things_n = 0
+    if work is not None:
+        star_n = len(list_all_starred(work))
+        buckets = scan_buckets(work)
+        shots_n = int(buckets.get('screenshots_count') or 0)
+        records_n = int(buckets.get('screenrecords_count') or 0)
+        docs_n = int(buckets.get('docs_count') or 0)
+        things_n = int(buckets.get('things_count') or 0)
+
+    def _jump(href: str, label: str, n: int = None) -> str:
+        if n is None:
+            return f'<a href="{_esc(href)}">{_esc(label)}</a>'
+        return (
+            f'<a href="{_esc(href)}">{_esc(label)}'
+            f'<span class="n"> {n}</span></a>'
+        )
+
+    more_links = [
+        _jump('/screenshots', '截图', shots_n),
+        _jump('/screenrecords', '录屏', records_n),
+        _jump('/docs', '文档', docs_n),
+        _jump('/things', '物品', things_n),
+        _jump('/themes', '主题'),
+    ]
+    jump_parts = [
+        '<a href="#" id="consoleLink">控制台</a>',
+        _jump('/starred', '加星', star_n),
+        '<details class="jumps-more">'
+        '<summary>更多</summary>'
+        f'<div class="jumps-more-panel">{"".join(more_links)}</div>'
+        '</details>',
+    ]
 
     work_html = ''
     if work is not None:
         work_html = f'<div class="work-path">{_esc(work)}</div>'
+
+    console_js = '''
+(function () {
+  var a = document.getElementById('consoleLink');
+  if (!a) return;
+  var url = null;
+  try { url = localStorage.getItem('picvault.dashboard.url'); } catch (e) {}
+  if (url) {
+    a.href = url;
+  } else {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      alert('请从控制台点「打开浏览」进入本页，或手动打开 outputs/dashboard.html');
+    });
+  }
+})();
+'''
 
     doc = f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1255,22 +1875,25 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
 <title>{_esc(title)} — PicVault</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>{PAGE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
-  <header class="masthead">
-    <div>
-      <h1 class="brand"><a href="/">PicVault</a></h1>
-      <p class="tagline">归档图库 · 浏览与加星</p>
+  <header class="topbar">
+    <a class="brand-mark" href="/">PicVault</a>
+    <div class="topbar-center">
+      <nav class="crumbs" aria-label="面包屑">{''.join(crumb_parts)}</nav>
+      {work_html}
     </div>
-    {work_html}
+    <nav class="jumps" aria-label="快捷入口">{''.join(jump_parts)}</nav>
   </header>
-  <nav class="nav" aria-label="面包屑">{''.join(nav_parts)}</nav>
+  <div class="page-in">
   {body}
+  </div>
 </div>
 <script>{PAGE_JS}</script>
+<script>{console_js}</script>
 </body>
 </html>'''
     return doc.encode('utf-8')
@@ -1294,7 +1917,12 @@ def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
         f'data-path="{_esc(rel)}" data-bucket="{_esc(bucket)}" '
         f'data-name="{_esc(f.name)}" data-video="{"1" if is_video else "0"}">'
     )
-    badge = '<span class="badge">VIDEO</span>' if is_video else ''
+    if is_live_photo_still(f):
+        badge = '<span class="badge">Live</span>'
+    elif is_video:
+        badge = '<span class="badge">VIDEO</span>'
+    else:
+        badge = ''
     star_cls = 'star on' if is_starred else 'star'
     star_char = '★' if is_starred else '☆'
     cell_cls = 'cell starred' if is_starred else 'cell'
@@ -1313,14 +1941,19 @@ def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
 
 
 def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') -> str:
-    """context: normal | screen | docs — hide the button for the current bucket."""
+    """context: normal | theme | screen | docs | things — hide the button for the current bucket."""
     actions = []
+    if context == 'theme':
+        actions.append(
+            '<button type="button" class="btn-reclass" data-reclassify="to_default_month" disabled>'
+            '放回默认月桶</button>'
+        )
     if context != 'screen':
         actions.append(
             '<button type="button" class="btn-reclass" data-reclassify="to_screen" disabled>'
             '移至截图录屏</button>'
         )
-    if context != 'normal':
+    if context not in ('normal', 'theme'):
         actions.append(
             '<button type="button" class="btn-reclass" data-reclassify="to_normal" disabled>'
             '移回普通分类</button>'
@@ -1330,6 +1963,11 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
             '<button type="button" class="btn-reclass" data-reclassify="to_docs" disabled>'
             '移至文档</button>'
         )
+    if context != 'things':
+        actions.append(
+            '<button type="button" class="btn-reclass" data-reclassify="to_things" disabled>'
+            '移至物品</button>'
+        )
     actions.append(
         '<button type="button" class="btn-trash" data-trash="1" disabled>'
         '移至回收站</button>'
@@ -1338,11 +1976,17 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
         f'<div class="toolbar">'
         f'<span class="count">{file_count} 个文件 · '
         f'<span id="pageMetaStars">{star_count}</span> 已加星</span>'
-        f'<span class="sel-count" id="selCount"></span>'
+        f'<div class="toolbar-filters">'
         f'<button type="button" class="chip on" data-filter="all">全部</button>'
         f'<button type="button" class="chip" data-filter="starred">'
         f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
+        f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
+        f'aria-pressed="false">选择</button>'
+        f'</div>'
+        f'<div class="toolbar-organize" aria-label="整理">'
+        f'<span class="sel-count" id="selCount"></span>'
         f'{"".join(actions)}'
+        f'</div>'
         f'</div>'
     )
 
@@ -1355,57 +1999,41 @@ def render_home(work: Path) -> bytes:
         months = buckets['years'][year]
         total_photos = sum(m['photos'] for m in months)
         total_videos = sum(m['videos'] for m in months)
+        total_stars = sum(m.get('stars', 0) for m in months)
+        total_lives = sum(m.get('lives', 0) for m in months)
         themed = sum(1 for m in months if m.get('is_themed'))
+        stats = format_ledger_stats(
+            total_photos, total_videos, total_stars, total_lives
+        )
         rows.append(
             f'<a class="ledger-row" href="/y/{_esc(year)}">'
             f'<span class="ledger-key">{_esc(year)}</span>'
             f'<span class="ledger-sub">{len(months)} 个月'
             f'{" · " + str(themed) + " 个主题" if themed else ""}</span>'
-            f'<span class="ledger-stats">{total_photos} 张 · {total_videos} 视频</span>'
+            f'<span class="ledger-stats">{stats}</span>'
+            f'<span class="ledger-go" aria-hidden="true">›</span>'
             f'</a>'
         )
     if not rows:
-        ledger = '<div class="ledger"><div class="ledger-empty">还没有归档。把照片放进 inbox/ 后跑 pipeline。</div></div>'
+        ledger = (
+            '<div class="ledger"><div class="ledger-empty">'
+            '还没有归档。把照片放进 inbox/ 后跑流水线。'
+            '</div></div>'
+        )
     else:
         ledger = f'<div class="ledger">{"".join(rows)}</div>'
 
-    shot_link = ''
-    links = []
-    if buckets['screenshots_count'] > 0:
-        links.append(
-            f'<a href="/screenshots">截图库 → {buckets["screenshots_count"]} 个文件</a>'
-        )
-    if buckets.get('screenrecords_count', 0) > 0:
-        links.append(
-            f'<a href="/screenrecords">录屏库 → {buckets["screenrecords_count"]} 个文件</a>'
-        )
-    if buckets.get('docs_count', 0) > 0:
-        links.append(
-            f'<a href="/docs">文档库 → {buckets["docs_count"]} 个文件</a>'
-        )
-    starred_n = count_starred(work)
-    # Prefer existing-file count for the home link
-    starred_live = len(list_all_starred(work))
-    if starred_live > 0 or starred_n > 0:
-        links.insert(
-            0,
-            f'<a href="/starred">加星 → {starred_live} 个文件</a>',
-        )
-    if links:
-        shot_link = (
-            f'<p style="margin:20px 0 0;font-size:0.92rem;color:var(--muted)">'
-            f'{" · ".join(links)}</p>'
-        )
-
     body = (
         f'<div class="page-head">'
-        f'<h2 class="page-title">年份索引</h2>'
-        f'<p class="page-meta">按 by-date/ 浏览归档</p>'
+        f'<div>'
+        f'<h2 class="page-title">归档</h2>'
+        f'<p class="page-lede">按年份翻看 by-date，点开加星。</p>'
         f'</div>'
-        f'<p class="section-label">Years</p>'
-        f'{ledger}{shot_link}'
+        f'</div>'
+        f'<p class="section-label">年份</p>'
+        f'{ledger}'
     )
-    return page_shell('归档浏览', body, work=work, crumbs=[('首页', '/')])
+    return page_shell('归档', body, work=work, crumbs=[('首页', '/')])
 
 
 def render_year(work: Path, year: str) -> bytes:
@@ -1420,8 +2048,8 @@ def render_year(work: Path, year: str) -> bytes:
     months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
     rows = []
     for m in months:
-        photo_count = sum(1 for _ in (m / 'photos').rglob('*') if _.is_file()) if (m / 'photos').exists() else 0
-        video_count = sum(1 for _ in (m / 'videos').rglob('*') if _.is_file()) if (m / 'videos').exists() else 0
+        photo_count, video_count, live_count = count_month_media(m)
+        star_count = len(load_stars(work, m.name))
         is_themed = '_' in m.name
         theme = m.name.split('_', 1)[1] if is_themed else ''
         sub = (
@@ -1429,11 +2057,15 @@ def render_year(work: Path, year: str) -> bytes:
             if theme else '默认桶'
         )
         href = f'/y/{year}/{urllib.parse.quote(m.name)}'
+        stats = format_ledger_stats(
+            photo_count, video_count, star_count, live_count
+        )
         rows.append(
             f'<a class="ledger-row" href="{_esc(href)}">'
             f'<span class="ledger-key">{_esc(m.name)}</span>'
             f'<span class="ledger-sub">{sub}</span>'
-            f'<span class="ledger-stats">{photo_count} 张 · {video_count} 视频</span>'
+            f'<span class="ledger-stats">{stats}</span>'
+            f'<span class="ledger-go" aria-hidden="true">›</span>'
             f'</a>'
         )
 
@@ -1443,14 +2075,58 @@ def render_year(work: Path, year: str) -> bytes:
         f'<h2 class="page-title">{_esc(year)}</h2>'
         f'<p class="page-meta">{len(months)} 个桶</p>'
         f'</div>'
-        f'<p class="section-label">Months</p>'
+        f'<p class="section-label">月份</p>'
         f'<div class="ledger">{ledger_inner}</div>'
     )
     return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
 
 
+def theme_ledger_sub(theme: dict) -> str:
+    """Format theme month + date_range for /themes ledger and theme bucket headers."""
+    month = str(theme.get('month') or '').strip()
+    parts = [month] if month else []
+    dr = theme.get('date_range')
+    start = end = ''
+    if isinstance(dr, dict):
+        start = str(dr.get('start') or '').strip()
+        end = str(dr.get('end') or '').strip()
+    # parse_simple_yaml may flatten date_range into theme-level start/end
+    if not start:
+        start = str(theme.get('start') or '').strip()
+    if not end:
+        end = str(theme.get('end') or '').strip()
+    if start and end:
+        def short(d: str) -> str:
+            m = re.match(r'^\d{4}-(\d{2})-(\d{2})$', d)
+            if m:
+                return f'{int(m.group(1))}/{int(m.group(2))}'
+            return d
+        parts.append(f'{short(start)}–{short(end)}')
+    elif start or end:
+        parts.append(start or end)
+    return ' · '.join(parts) if parts else '—'
+
+
+def theme_for_bucket(work: Path, bucket: str):
+    """Return events.yaml theme matching YYYY-MM_<name> bucket, or None."""
+    if '_' not in bucket:
+        return None
+    try:
+        themes = rename_mod.load_events(work, None)
+    except ValueError:
+        return None
+    for t in themes:
+        month = str(t.get('month') or '').strip()
+        name = str(t.get('name') or '').strip()
+        if month and name and f'{month}_{name}' == bucket:
+            return t
+    return None
+
+
 def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     bucket_name = month
+    is_themed = '_' in month
+    gallery_ctx = 'theme' if is_themed else 'normal'
     files = list_bucket(work, year, month)
     stars = load_stars(work, bucket_name)
     cells = [
@@ -1462,12 +2138,19 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         if cells else
         '<div class="ledger"><div class="ledger-empty">这个桶里还没有文件。</div></div>'
     )
+    meta = year
+    if is_themed:
+        theme = theme_for_bucket(work, month)
+        if theme is not None:
+            period = theme_ledger_sub(theme)
+            if period and period != '—':
+                meta = f'周期 {period}'
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">{_esc(month)}</h2>'
-        f'<p class="page-meta">{_esc(year)}</p>'
+        f'<p class="page-meta">{_esc(meta)}</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context="normal")}'
+        f'{_gallery_toolbar(len(files), len(stars), context=gallery_ctx)}'
         f'{sheet}'
     )
     return page_shell(
@@ -1569,6 +2252,35 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
     )
 
 
+def render_things(work: Path, thumb_root: Path) -> bytes:
+    files = list_things(work)
+    bucket_name = 'things'
+    stars = load_stars(work, bucket_name)
+    cells = [
+        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
+        for i, f in enumerate(files)
+    ]
+    sheet = (
+        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
+        if cells else
+        '<div class="ledger"><div class="ledger-empty">没有物品照片。</div></div>'
+    )
+    body = (
+        f'<div class="page-head">'
+        f'<h2 class="page-title">物品</h2>'
+        f'<p class="page-meta">things/ · 物品照片/视频，手动移入</p>'
+        f'</div>'
+        f'{_gallery_toolbar(len(files), len(stars), context="things")}'
+        f'{sheet}'
+    )
+    return page_shell(
+        '物品',
+        body,
+        work=work,
+        crumbs=[('首页', '/'), ('物品', '/things')],
+    )
+
+
 def render_starred(work: Path, thumb_root: Path) -> bytes:
     """Unified gallery of every starred file across buckets."""
     items = list_all_starred(work)
@@ -1609,6 +2321,17 @@ _HIDDEN_DIR_NOISE = frozenset({
 })
 
 
+def is_user_media_file(path: Path) -> bool:
+    """True for countable media/docs files (excludes .DS_Store and most dotfiles)."""
+    if not path.is_file():
+        return False
+    if path.name == '.DS_Store':
+        return False
+    if path.name.startswith('.') and path.name != '.source':
+        return False
+    return True
+
+
 def count_files_in(dir_path: Path) -> int:
     """Count user-visible files under dir_path (aligned with rename_organize.scan_inbox).
 
@@ -1625,11 +2348,7 @@ def count_files_in(dir_path: Path) -> int:
         n = 0
         rel_base = dir_path.resolve()
         for f in dir_path.rglob('*'):
-            if not f.is_file():
-                continue
-            if f.name == '.DS_Store':
-                continue
-            if f.name.startswith('.') and f.name != '.source':
+            if not is_user_media_file(f):
                 continue
             try:
                 parts = set(f.resolve().relative_to(rel_base).parts)
@@ -1677,7 +2396,8 @@ def last_sync_time(work: Path) -> str:
 
 # Top-level dirs created by init_storage.sh (must all exist as directories).
 _INIT_SKELETON_DIRS = (
-    'inbox', 'by-date', 'screenshots', '_favorite', '_vlogs', '_trash', '_meta',
+    'inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', 'things',
+    '_favorite', '_vlogs', '_trash', '_meta',
 )
 
 
@@ -1686,6 +2406,7 @@ def ensure_work_dirs(work: Path):
     (work / 'screenrecords').mkdir(parents=True, exist_ok=True)
     (work / 'screenshots').mkdir(parents=True, exist_ok=True)
     (work / 'docs').mkdir(parents=True, exist_ok=True)
+    (work / 'things').mkdir(parents=True, exist_ok=True)
 
 
 def is_work_initialized(work: Path) -> bool:
@@ -1704,10 +2425,47 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # quiet
 
+    def _cors_origin_header(self):
+        """Return an allowed Origin to echo, or None if none / not allowed."""
+        origin = self.headers.get('Origin')
+        if origin is None or origin == '':
+            return None
+        if is_allowed_cors_origin(origin):
+            return origin
+        return False  # present but disallowed
+
+    def _write_cors_headers(self):
+        """Attach CORS headers when Origin is allowed. Returns False if Origin forbidden."""
+        echoed = self._cors_origin_header()
+        if echoed is False:
+            return False
+        if echoed is not None:
+            self.send_header('Access-Control-Allow-Origin', echoed)
+            self.send_header('Vary', 'Origin')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        return True
+
+    def _reject_cors(self):
+        body = b'{"ok": false, "error": "origin not allowed"}'
+        self.send_response(403)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_OPTIONS(self):
-        # CORS preflight from file:// dashboard
+        # CORS preflight (file:// / localhost dashboard → API)
+        origin = self.headers.get('Origin')
+        if origin is not None and origin != '' and not is_allowed_cors_origin(origin):
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Content-Length', '0')
@@ -1715,11 +2473,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle star/unstar JSON requests."""
+        # Mutating POSTs: reject cross-site Origins (never reflect *).
+        if self.headers.get('Origin') is not None and not is_allowed_cors_origin(
+            self.headers.get('Origin')
+        ):
+            self._reject_cors()
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        # Read body
+        # Read body (capped)
         try:
-            length = int(self.headers.get('Content-Length', 0))
+            length = int(self.headers.get('Content-Length', 0) or 0)
+        except (TypeError, ValueError):
+            self._send_json({'ok': False, 'error': 'bad Content-Length'})
+            return
+        if length < 0 or length > MAX_POST_BODY:
+            # Drain a bounded amount so the client is less likely to hang.
+            if length > 0:
+                try:
+                    self.rfile.read(min(length, MAX_POST_BODY + 65536))
+                except Exception:
+                    pass
+            self._send_json({'ok': False, 'error': 'body too large'}, status=413)
+            return
+        try:
             body_bytes = self.rfile.read(length) if length else b''
             data = json.loads(body_bytes.decode('utf-8')) if body_bytes else {}
         except Exception as e:
@@ -1728,32 +2506,12 @@ class Handler(BaseHTTPRequestHandler):
         qs = {**urllib.parse.parse_qs(parsed.query), **data}
 
         try:
-            if path == '/api/star' and 'path' in qs and 'bucket' in qs:
-                path_q = qs['path'][0] if isinstance(qs['path'], list) else qs['path']
-                path_q = urllib.parse.unquote(path_q)
-                bucket = qs['bucket'][0] if isinstance(qs['bucket'], list) else qs['bucket']
-                bucket = urllib.parse.unquote(str(bucket))
-                # Security: path must be under work
-                full = (self.work / path_q).resolve()
-                if not str(full).startswith(str(self.work.resolve())):
-                    self._send_json({'ok': False, 'error': 'path outside work'})
-                    return
-                action = qs.get('action', ['toggle'])[0] if isinstance(qs.get('action'), list) else qs.get('action', 'toggle')
-                stars = load_stars(self.work, bucket)
-                if action == 'on':
-                    stars[path_q] = True
-                elif action == 'off':
-                    stars.pop(path_q, None)
-                else:
-                    stars[path_q] = not stars.get(path_q, False)
-                    if not stars[path_q]:
-                        stars.pop(path_q, None)
-                save_stars(self.work, bucket, stars)
-                self._send_json({'ok': True, 'starred': path_q in stars})
+            if path == '/api/star':
+                self._handle_star_api(qs)
                 return
             elif path == '/api/run':
-                # Body: {"command": "<whitelisted-name>"}
-                # Args are server-side constants; never user-supplied.
+                # Body: {"command": "<whitelisted-name>", "backup"?: "<whitelisted path>"}
+                # Command names are whitelisted; backup (if any) is sandbox-validated.
                 cmd_name = data.get('command') if isinstance(data, dict) else None
                 if cmd_name not in RUN_COMMANDS:
                     self._send_json({
@@ -1762,17 +2520,33 @@ class Handler(BaseHTTPRequestHandler):
                         'allowed': sorted(RUN_COMMANDS.keys()),
                     })
                     return
-                argv = RUN_COMMANDS[cmd_name]()
+                backup = BACKUP_DEFAULT
+                raw_backup = data.get('backup') if isinstance(data, dict) else None
+                if raw_backup:
+                    try:
+                        backup = str(validate_path(str(raw_backup), ALLOWED_BACKUP_PREFIXES, 'backup'))
+                    except ValueError as e:
+                        self._send_json({'ok': False, 'error': str(e)})
+                        return
+                argv = RUN_COMMANDS[cmd_name](backup)
                 cmd_str = ' '.join(argv)
-                self._run_streaming(argv, cmd_str, cmd_name)
+                self._run_streaming(argv, cmd_str, cmd_name, backup=backup)
+                return
+            elif path == '/api/runs/cancel':
+                self._cancel_active_run()
                 return
             elif path == '/api/reclassify':
                 action = data.get('action') if isinstance(data, dict) else None
                 paths = data.get('paths') if isinstance(data, dict) else None
-                if action not in ('to_screen', 'to_normal', 'to_docs'):
+                if action not in (
+                    'to_screen', 'to_normal', 'to_docs', 'to_things', 'to_default_month',
+                ):
                     self._send_json({
                         'ok': False,
-                        'error': 'action must be to_screen|to_normal|to_docs',
+                        'error': (
+                            'action must be to_screen|to_normal|to_docs|'
+                            'to_things|to_default_month'
+                        ),
                     })
                     return
                 if not isinstance(paths, list) or not paths:
@@ -1781,10 +2555,21 @@ class Handler(BaseHTTPRequestHandler):
                 if len(paths) > 500:
                     self._send_json({'ok': False, 'error': 'too many paths (max 500)'})
                     return
-                results = rename_mod.reclassify_paths(self.work, paths, action, dry_run=False)
+                if action == 'to_default_month':
+                    results = rename_mod.return_to_default_month_paths(
+                        self.work, paths, dry_run=False,
+                    )
+                else:
+                    results = rename_mod.reclassify_paths(
+                        self.work, paths, action, dry_run=False,
+                    )
                 for item in results:
                     if item.get('ok') and item.get('dest') and not item.get('skipped'):
                         migrate_star_path(self.work, item['src'], item['dest'])
+                        if item.get('companion_src') and item.get('companion_dest'):
+                            migrate_star_path(
+                                self.work, item['companion_src'], item['companion_dest'],
+                            )
                 ok_n = sum(1 for r in results if r.get('ok'))
                 self._send_json({
                     'ok': ok_n == len(results),
@@ -1807,6 +2592,9 @@ class Handler(BaseHTTPRequestHandler):
                     'results': results,
                     'moved': ok_n,
                 })
+                return
+            elif path == '/api/events':
+                self._handle_events_api(data if isinstance(data, dict) else {})
                 return
             else:
                 self._send_json({'ok': False, 'error': 'unknown endpoint'})
@@ -1831,20 +2619,31 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/docs':
                 body = render_docs(self.work, self.thumb_root)
                 self._send(body, 'text/html')
+            elif path == '/things':
+                body = render_things(self.work, self.thumb_root)
+                self._send(body, 'text/html')
             elif path == '/starred':
                 body = render_starred(self.work, self.thumb_root)
                 self._send(body, 'text/html')
             elif path == '/api/status':
                 # JSON status endpoint for dashboard polling
+                try:
+                    code_mtime = datetime.fromtimestamp(
+                        Path(__file__).stat().st_mtime
+                    ).isoformat(timespec='seconds')
+                except OSError:
+                    code_mtime = None
                 self._send_json({
                     'running': True,
                     'work': str(self.work),
                     'initialized': is_work_initialized(self.work),
+                    'code_mtime': code_mtime,
                     'inbox': count_files_in(self.work / 'inbox'),
                     'by_date': count_files_in(self.work / 'by-date'),
                     'screenshots': count_files_in(self.work / 'screenshots'),
                     'screenrecords': count_files_in(self.work / 'screenrecords'),
                     'docs': count_files_in(self.work / 'docs'),
+                    'things': count_files_in(self.work / 'things'),
                     'vlogs': count_files_in(self.work / '_vlogs'),
                     'trash': count_files_in(self.work / '_trash'),
                     'starred': count_starred(self.work),
@@ -1880,6 +2679,14 @@ class Handler(BaseHTTPRequestHandler):
                 parts = path.split('/')
                 year = parts[2]
                 month = urllib.parse.unquote(parts[3])
+                if not is_safe_month_segment(month):
+                    self._send(b'bad month', 'text/plain', 400)
+                    return
+                year_dir = (self.work / 'by-date' / year).resolve()
+                month_dir = (self.work / 'by-date' / year / month).resolve()
+                if not path_is_under(month_dir, year_dir):
+                    self._send(b'forbidden', 'text/plain', 403)
+                    return
                 body = render_bucket(self.work, year, month, self.thumb_root)
                 self._send(body, 'text/html')
             elif path == '/raw':
@@ -1888,28 +2695,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/thumb':
                 p = qs.get('p', [''])[0]
                 self._send_thumb(p)
-            elif path == '/api/star' and 'path' in qs and 'bucket' in qs:
-                path_q = qs['path'][0] if isinstance(qs['path'], list) else qs['path']
-                path_q = urllib.parse.unquote(path_q)
-                bucket = qs['bucket'][0] if isinstance(qs['bucket'], list) else qs['bucket']
-                bucket = urllib.parse.unquote(str(bucket))
-                # Security: path must be under work
-                full = (self.work / path_q).resolve()
-                if not str(full).startswith(str(self.work.resolve())):
-                    self._send_json({'ok': False, 'error': 'path outside work'})
-                    return
-                action = qs.get('action', ['toggle'])[0]
-                stars = load_stars(self.work, bucket)
-                if action == 'on':
-                    stars[path_q] = True
-                elif action == 'off':
-                    stars.pop(path_q, None)
-                else:
-                    stars[path_q] = not stars.get(path_q, False)
-                    if not stars[path_q]:
-                        stars.pop(path_q, None)
-                save_stars(self.work, bucket, stars)
-                self._send_json({'ok': True, 'starred': path_q in stars})
+            elif path == '/api/star':
+                self._handle_star_api(qs)
             else:
                 self._send(b'404 Not Found', 'text/plain', 404)
         except Exception as e:
@@ -1918,17 +2705,108 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, body: bytes, content_type='text/html', status=200):
         self.send_response(status)
         self.send_header('Content-Type', f'{content_type}; charset=utf-8')
-        # Allow dashboard.html opened via file:// to call /api/* freely.
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        # Same-origin / localhost / file:// only — never reflect * for API responses.
+        if not self._write_cors_headers():
+            # Origin present but disallowed: still send body for non-JS clients,
+            # but omit ACAO so browsers block cross-site reads.
+            pass
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_json(self, obj):
+    def _send_json(self, obj, status=200):
         body = json.dumps(obj).encode()
-        self._send(body, 'application/json')
+        self._send(body, 'application/json', status=status)
+
+    def _handle_star_api(self, qs: dict):
+        """Toggle/on/off star for a work-relative path; persist under _meta/stars/."""
+        raw_path = qs.get('path')
+        raw_bucket = qs.get('bucket')
+        if raw_path is None or raw_bucket is None:
+            self._send_json({'ok': False, 'error': 'path and bucket required'})
+            return
+        path_q = raw_path[0] if isinstance(raw_path, list) else raw_path
+        path_q = urllib.parse.unquote(str(path_q)).strip()
+        bucket = raw_bucket[0] if isinstance(raw_bucket, list) else raw_bucket
+        bucket = urllib.parse.unquote(str(bucket)).strip()
+        if not path_q or not bucket:
+            self._send_json({'ok': False, 'error': 'path and bucket required'})
+            return
+        if not is_safe_star_bucket(bucket):
+            self._send_json({'ok': False, 'error': 'invalid bucket'})
+            return
+        try:
+            resolve_stars_path(self.work, bucket)
+        except ValueError:
+            self._send_json({'ok': False, 'error': 'invalid bucket'})
+            return
+        # Media path must resolve to an existing file under work.
+        full = safe_under_work(self.work, path_q)
+        if full is None:
+            self._send_json({'ok': False, 'error': 'path outside work'})
+            return
+        if not full.is_file():
+            self._send_json({'ok': False, 'error': 'path not found'})
+            return
+        action = qs.get('action', ['toggle'])
+        if isinstance(action, list):
+            action = action[0] if action else 'toggle'
+        action = str(action or 'toggle')
+        stars = load_stars(self.work, bucket)
+        if action == 'on':
+            stars[path_q] = True
+        elif action == 'off':
+            stars.pop(path_q, None)
+        else:
+            stars[path_q] = not stars.get(path_q, False)
+            if not stars[path_q]:
+                stars.pop(path_q, None)
+        save_stars(self.work, bucket, stars)
+        self._send_json({'ok': True, 'starred': path_q in stars})
+
+    def _handle_events_api(self, data: dict):
+        """POST /api/events — validate and atomically write _meta/events.yaml."""
+        yaml_text = data.get('yaml')
+        if not isinstance(yaml_text, str):
+            self._send_json({'ok': False, 'error': 'yaml string required'})
+            return
+        # Normalize newlines; reject null bytes
+        if '\x00' in yaml_text:
+            self._send_json({'ok': False, 'error': 'invalid yaml content'})
+            return
+        if not yaml_text.endswith('\n'):
+            yaml_text = yaml_text + '\n'
+        try:
+            themes = rename_mod.parse_events_yaml_text(yaml_text)
+            rename_mod.validate_events_themes(themes)
+        except ValueError as e:
+            self._send_json({'ok': False, 'error': str(e)})
+            return
+
+        meta = self.work / '_meta'
+        meta.mkdir(parents=True, exist_ok=True)
+        dest = meta / 'events.yaml'
+        bak = meta / 'events.yaml.bak'
+        tmp = meta / 'events.yaml.tmp'
+        try:
+            if dest.exists():
+                shutil.copy2(dest, bak)
+            tmp.write_text(yaml_text, encoding='utf-8')
+            os.replace(tmp, dest)
+        except Exception as e:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            self._send_json({'ok': False, 'error': f'write failed: {e}'})
+            return
+        self._send_json({
+            'ok': True,
+            'themes': len(themes),
+            'path': '_meta/events.yaml',
+            'bak': '_meta/events.yaml.bak' if bak.exists() else None,
+        })
 
     def _handle_runs_get(self, path: str, qs: dict):
         """GET /api/runs/<id> or /api/runs/<id>/log?offset=N (active/latest handled above)."""
@@ -1969,6 +2847,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(b'forbidden', 'text/plain', 403)
                 return
 
+            # Cap each read so huge run logs (dedupe etc.) cannot freeze clients.
+            LOG_CHUNK_MAX = 64 * 1024
             chunk = ''
             next_offset = offset
             if log_path.is_file():
@@ -1977,7 +2857,7 @@ class Handler(BaseHTTPRequestHandler):
                     offset = size
                 with open(log_path, 'rb') as f:
                     f.seek(offset)
-                    data = f.read()
+                    data = f.read(LOG_CHUNK_MAX)
                 next_offset = offset + len(data)
                 chunk = data.decode('utf-8', errors='replace')
 
@@ -2015,9 +2895,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/x-ndjson; charset=utf-8')
         self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self._write_cors_headers()
         self.send_header('Connection', 'close')
         self.end_headers()
 
@@ -2032,7 +2910,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
 
     def _finish_run_meta(self, meta: dict, status: str, rc=None, error=None):
-        global _ACTIVE_RUN
+        global _ACTIVE_RUN, _ACTIVE_PROC, _CANCEL_REQUESTED
         meta['finished_at'] = datetime.now().isoformat(timespec='seconds')
         meta['status'] = status
         meta['rc'] = rc
@@ -2041,14 +2919,51 @@ class Handler(BaseHTTPRequestHandler):
         with _RUN_LOCK:
             if _ACTIVE_RUN and _ACTIVE_RUN.get('id') == meta['id']:
                 _ACTIVE_RUN = None
+            _ACTIVE_PROC = None
+            _CANCEL_REQUESTED = False
 
-    def _run_streaming(self, argv, cmd_str: str, cmd_name: str):
+    def _cancel_active_run(self):
+        """POST /api/runs/cancel — terminate the active /api/run subprocess."""
+        global _CANCEL_REQUESTED
+        with _RUN_LOCK:
+            meta = dict(_ACTIVE_RUN) if _ACTIVE_RUN else None
+            proc = _ACTIVE_PROC
+            running = bool(meta and meta.get('status') == 'running')
+            if running:
+                _CANCEL_REQUESTED = True
+        if not running:
+            self._send_json({'ok': False, 'error': '没有运行中的任务'})
+            return
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._send_json({
+            'ok': True,
+            'cancelled': True,
+            'run_id': meta.get('id') if meta else None,
+            'command_name': meta.get('command_name') if meta else None,
+        })
+
+    def _run_streaming(self, argv, cmd_str: str, cmd_name: str, backup: str = None):
         """Run argv, stream NDJSON, and persist to _meta/logs/runs/.
 
         Client disconnect does not kill the subprocess — output keeps going to
         the log file so the dashboard can resume via /api/runs/<id>/log.
+        Use POST /api/runs/cancel to terminate an active run.
         """
-        global _ACTIVE_RUN
+        global _ACTIVE_RUN, _ACTIVE_PROC, _CANCEL_REQUESTED
+
+        if backup is None:
+            backup = BACKUP_DEFAULT
 
         with _RUN_LOCK:
             if _ACTIVE_RUN is not None and _ACTIVE_RUN.get('status') == 'running':
@@ -2074,6 +2989,8 @@ class Handler(BaseHTTPRequestHandler):
             runs_dir(self.work).mkdir(parents=True, exist_ok=True)
             persist_run_meta(self.work, meta)
             _ACTIVE_RUN = dict(meta)
+            _CANCEL_REQUESTED = False
+            _ACTIVE_PROC = None
 
         log_path = self.work / log_rel
         log_fp = None
@@ -2106,8 +3023,17 @@ class Handler(BaseHTTPRequestHandler):
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    env={**os.environ, 'PYTHONUNBUFFERED': '1'},
+                    # WORK/BACKUP must match this server / dashboard so CLI helpers
+                    # (web stop, pipeline sync) hit the same disks (env beats config).
+                    env={
+                        **os.environ,
+                        'PYTHONUNBUFFERED': '1',
+                        'WORK': str(self.work),
+                        'BACKUP': str(backup),
+                    },
                 )
+                with _RUN_LOCK:
+                    _ACTIVE_PROC = proc
             except FileNotFoundError as e:
                 err = f'not found: {e}'
                 self._finish_run_meta(meta, 'error', rc=None, error=err)
@@ -2222,18 +3148,31 @@ class Handler(BaseHTTPRequestHandler):
                         if kind is not None:
                             append_log(kind, payload)
                             emit({'type': kind, 'line': payload})
-                    emit({
-                        'type': 'end',
-                        'ok': rc == 0,
-                        'rc': rc,
-                        'run_id': run_id,
-                    })
-                    if rc == 0:
-                        self._finish_run_meta(meta, 'ok', rc=rc, error=None)
+                    with _RUN_LOCK:
+                        cancelled = _CANCEL_REQUESTED
+                    if cancelled:
+                        err = '已打断'
+                        append_log('stderr', err)
+                        emit({
+                            'type': 'error',
+                            'error': err,
+                            'command': cmd_str,
+                            'run_id': run_id,
+                        })
+                        self._finish_run_meta(meta, 'cancelled', rc=rc, error=err)
                     else:
-                        self._finish_run_meta(
-                            meta, 'error', rc=rc, error=f'exit {rc}'
-                        )
+                        emit({
+                            'type': 'end',
+                            'ok': rc == 0,
+                            'rc': rc,
+                            'run_id': run_id,
+                        })
+                        if rc == 0:
+                            self._finish_run_meta(meta, 'ok', rc=rc, error=None)
+                        else:
+                            self._finish_run_meta(
+                                meta, 'error', rc=rc, error=f'exit {rc}'
+                            )
                     finalized = True
             except Exception as e:
                 if started:
@@ -2286,9 +3225,8 @@ class Handler(BaseHTTPRequestHandler):
         """Serve original media; supports HTTP Range for video seeking."""
         if not rel_path:
             self._send(b'missing path', 'text/plain', 400); return
-        full = (self.work / rel_path).resolve()
-        work_res = self.work.resolve()
-        if not (str(full).startswith(str(work_res) + os.sep) or full == work_res):
+        full = safe_under_work(self.work, rel_path)
+        if full is None:
             self._send(b'forbidden', 'text/plain', 403); return
         if not full.exists() or not full.is_file():
             self._send(b'not found', 'text/plain', 404); return
@@ -2333,43 +3271,233 @@ class Handler(BaseHTTPRequestHandler):
             shutil.copyfileobj(f, self.wfile)
 
     def _send_thumb(self, rel_path: str):
-        """Serve thumbnail."""
+        """Serve thumbnail (same work fence as /raw; output under thumb_root)."""
         if not rel_path:
             self._send(b'missing', 'text/plain', 400); return
-        thumb = thumb_for(self.work / rel_path, self.work, self.thumb_root)
+        full = safe_under_work(self.work, rel_path)
+        if full is None:
+            self._send(b'forbidden', 'text/plain', 403); return
+        if not full.is_file():
+            self._send(b'not found', 'text/plain', 404); return
+        thumb = thumb_for(full, self.work, self.thumb_root)
         if not thumb or not thumb.exists():
             self._send(b'no thumb', 'text/plain', 404); return
-        self._send_raw(str(thumb.relative_to(self.work)))
+        thumb_res = thumb.resolve()
+        thumb_root_res = self.thumb_root.resolve()
+        if not path_is_under(thumb_res, thumb_root_res):
+            self._send(b'forbidden', 'text/plain', 403); return
+        # Serve JPEG bytes directly (already fenced under thumb_root).
+        try:
+            data = thumb_res.read_bytes()
+        except OSError:
+            self._send(b'no thumb', 'text/plain', 404); return
+        self.send_response(200)
+        self.send_header('Content-Type', 'image/jpeg')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _theme_bucket_href(month: str, name: str) -> str:
+        """Browse link for a theme side-bucket only (never default YYYY-MM/).
+
+        Theme dirs are created by sync/rebucket. Until then the URL still points
+        at YYYY-MM_<name>; render_bucket shows an empty gallery if missing.
+        """
+        month_s = str(month or '').strip()
+        name_s = str(name or '').strip()
+        if not re.match(r'^\d{4}-\d{2}$', month_s) or not name_s:
+            return '/themes'
+        year = month_s[:4]
+        themed = f'{month_s}_{name_s}'
+        return f'/y/{year}/{urllib.parse.quote(themed)}'
+
+    @staticmethod
+    def _theme_ledger_sub(theme: dict) -> str:
+        return theme_ledger_sub(theme)
+
+    @staticmethod
+    def _theme_ledger_stats(theme: dict) -> str:
+        bits = []
+        sources = theme.get('sources')
+        if isinstance(sources, list) and sources:
+            bits.append(' · '.join(str(s) for s in sources if str(s).strip()))
+        files = theme.get('files')
+        if isinstance(files, list) and files:
+            bits.append(f'{len(files)} 个文件')
+        return ' · '.join(b for b in bits if b) or ''
 
     def _render_themes(self) -> bytes:
         path = self.work / '_meta' / 'events.yaml'
         crumbs = [('首页', '/'), ('主题', '/themes')]
-        if not path.exists():
-            body = (
-                '<div class="page-head"><h2 class="page-title">主题</h2></div>'
-                '<div class="ledger"><div class="ledger-empty">'
-                '未找到 events.yaml。</div></div>'
+        exists = path.exists()
+        text = path.read_text(encoding='utf-8') if exists else EMPTY_EVENTS_YAML
+        sync_all_cmd = (
+            f"WORK={shlex.quote(str(self.work))} "
+            f"{shlex.quote(str(PICVAULT_BIN))} theme rebucket --all"
+        )
+        if not PICVAULT_BIN.is_file():
+            sync_all_cmd = (
+                f"WORK={shlex.quote(str(self.work))} "
+                f"python3 {shlex.quote(str(RENAME_SCRIPT))} "
+                f"--rebucket-themes --all --dry-run"
             )
-            return page_shell('主题', body, work=self.work, crumbs=crumbs)
-        text = path.read_text()
-        # Crude themes section extract
-        in_themes = False
-        themes_text = []
-        for line in text.split('\n'):
-            if line.startswith('themes:'):
-                in_themes = True
-                continue
-            if in_themes:
-                if line and not line.startswith(' ') and not line.startswith('#'):
-                    break
-                themes_text.append(line)
-        content = '\n'.join(themes_text).strip() or '(空)'
+
+        def _theme_sync_cmd(theme_name: str) -> str:
+            if PICVAULT_BIN.is_file():
+                return (
+                    f"WORK={shlex.quote(str(self.work))} "
+                    f"{shlex.quote(str(PICVAULT_BIN))} theme rebucket "
+                    f"--theme {shlex.quote(theme_name)}"
+                )
+            return (
+                f"WORK={shlex.quote(str(self.work))} "
+                f"python3 {shlex.quote(str(RENAME_SCRIPT))} "
+                f"--rebucket-themes --theme {shlex.quote(theme_name)} --dry-run"
+            )
+
+        parse_err = None
+        themes: list = []
+        try:
+            themes = rename_mod.parse_events_yaml_text(text)
+            rename_mod.validate_events_themes(themes)
+        except ValueError as e:
+            parse_err = str(e)
+            themes = []
+
+        rows = []
+        for t in themes:
+            name = str(t.get('name') or '').strip() or '（未命名）'
+            month = str(t.get('month') or '').strip()
+            href = self._theme_bucket_href(month, name)
+            sub = self._theme_ledger_sub(t)
+            stats = self._theme_ledger_stats(t)
+            sync_one = _theme_sync_cmd(name) if str(t.get('name') or '').strip() else ''
+            sync_btn = (
+                f'<button type="button" class="ledger-sync" data-sync-cmd="{_esc(sync_one)}" '
+                f'title="同步此主题：吸入/吐出本主题；不再匹配时可改派到其它主题。不改动其它主题桶里原有文件。">'
+                f'复制同步命令</button>'
+                if sync_one else ''
+            )
+            rows.append(
+                f'<div class="ledger-row">'
+                f'<a class="ledger-key" href="{_esc(href)}">{_esc(name)}</a>'
+                f'<span class="ledger-sub">{_esc(sub)}</span>'
+                f'<span class="ledger-stats">{_esc(stats)}</span>'
+                f'<span class="ledger-actions">{sync_btn}'
+                f'<a class="ledger-go" href="{_esc(href)}" aria-hidden="true">›</a>'
+                f'</span>'
+                f'</div>'
+            )
+
+        if parse_err:
+            ledger = (
+                '<div class="ledger"><div class="ledger-empty">'
+                '配置无法解析，请展开下方编辑配置修正。'
+                '</div></div>'
+            )
+            hint = (
+                f'<p class="events-hint err">配置有误：{_esc(parse_err)}</p>'
+            )
+            fold_note = ''
+            fold_open = ' open'
+        elif not rows:
+            ledger = (
+                '<div class="ledger"><div class="ledger-empty">'
+                '还没有主题。展开下方编辑配置，按示例添加。'
+                '</div></div>'
+            )
+            hint = ''
+            fold_note = (
+                '<p class="events-fold-note">保存只写配置。改完后对该主题点'
+                '「复制同步命令」才会搬家（先 dry-run）。</p>'
+            )
+            fold_open = ''
+        else:
+            ledger = f'<div class="ledger">{"".join(rows)}</div>'
+            hint = ''
+            fold_note = (
+                '<p class="events-fold-note">保存 ≠ 搬家。改配置 → 保存 → '
+                '该行「复制同步命令」（先 dry-run）。同步只扫本主题。</p>'
+            )
+            fold_open = ''
+
+        if not exists and not parse_err:
+            hint = (
+                '<p class="events-hint">尚未创建配置文件；保存时会写入配置。</p>'
+            )
+
         body = (
             '<div class="page-head">'
+            '<div>'
             '<h2 class="page-title">主题</h2>'
-            '<p class="page-meta">_meta/events.yaml</p>'
+            '<p class="page-lede">按月份命名旅行与事件。</p>'
             '</div>'
-            f'<pre class="pre-block">{_esc(content)}</pre>'
+            '</div>'
+            f'{hint}'
+            f'{ledger}'
+            f'<details class="events-fold"{fold_open}>'
+            '<summary>编辑配置</summary>'
+            '<div class="events-editor">'
+            f'{fold_note}'
+            '<div class="events-toolbar">'
+            '<button type="button" class="primary" id="eventsSave">保存</button>'
+            '<button type="button" id="eventsReload">重新加载</button>'
+            '<button type="button" id="eventsCopySyncAll">复制同步全部</button>'
+            '<span class="events-status" id="eventsStatus"></span>'
+            '</div>'
+            f'<textarea id="eventsYaml" spellcheck="false">{_esc(text)}</textarea>'
+            '</div>'
+            '</details>'
+            '<script>(function(){\n'
+            'var ta=document.getElementById("eventsYaml");\n'
+            'var st=document.getElementById("eventsStatus");\n'
+            'var saveBtn=document.getElementById("eventsSave");\n'
+            'var fold=document.querySelector(".events-fold");\n'
+            'var initial=ta.value;\n'
+            'var syncAllCmd=' + json.dumps(sync_all_cmd) + ';\n'
+            'function setStatus(msg, cls){st.textContent=msg||"";st.className="events-status"+(cls?" "+cls:"");}\n'
+            'function dirty(){return ta.value!==initial;}\n'
+            'function copyCmd(cmd, okMsg){\n'
+            '  navigator.clipboard.writeText(cmd).then(function(){setStatus(okMsg,"ok");},\n'
+            '    function(){setStatus("复制失败：请手动复制终端命令","err");});\n'
+            '}\n'
+            'ta.addEventListener("input",function(){if(dirty()&&fold&&!fold.open)fold.open=true;});\n'
+            'window.addEventListener("beforeunload",function(e){if(!dirty())return;e.preventDefault();e.returnValue="";});\n'
+            'document.getElementById("eventsReload").addEventListener("click",function(){\n'
+            '  if(dirty()&&!confirm("丢弃未保存的修改？"))return;\n'
+            '  location.reload();\n'
+            '});\n'
+            'document.getElementById("eventsCopySyncAll").addEventListener("click",function(){\n'
+            '  if(!confirm("全量同步会按配置收敛每一个主题桶，可能覆盖手工调整。复制的是 dry-run 命令；确认后再加 --yes。仍要复制？"))return;\n'
+            '  copyCmd(syncAllCmd,"已复制同步全部（dry-run）；确认后加 --yes");\n'
+            '});\n'
+            'document.querySelectorAll(".ledger-sync").forEach(function(btn){\n'
+            '  btn.addEventListener("click",function(e){\n'
+            '    e.preventDefault();e.stopPropagation();\n'
+            '    var cmd=btn.getAttribute("data-sync-cmd")||"";\n'
+            '    if(!cmd){setStatus("无法生成同步命令","err");return;}\n'
+            '    copyCmd(cmd,"已复制该主题同步命令（dry-run）；确认后加 --yes 或去掉 --dry-run");\n'
+            '  });\n'
+            '});\n'
+            'saveBtn.addEventListener("click",async function(){\n'
+            '  saveBtn.disabled=true;setStatus("保存中…","");\n'
+            '  try{\n'
+            '    var r=await fetch("/api/events",{method:"POST",headers:{"Content-Type":"application/json"},\n'
+            '      body:JSON.stringify({yaml:ta.value})});\n'
+            '    var data=await r.json();\n'
+            '    if(!data.ok){\n'
+            '      setStatus(data.error||"保存失败","err");\n'
+            '      if(fold)fold.open=true;\n'
+            '      return;\n'
+            '    }\n'
+            '    initial=ta.value;\n'
+            '    setStatus("已保存 "+data.themes+" 个主题。点该行「复制同步命令」才会搬家。","ok");\n'
+            '    setTimeout(function(){location.reload();},600);\n'
+            '  }catch(e){setStatus(String(e),"err");if(fold)fold.open=true;}\n'
+            '  finally{saveBtn.disabled=false;}\n'
+            '});\n'
+            '})();</script>'
         )
         return page_shell('主题', body, work=self.work, crumbs=crumbs)
 
@@ -2377,7 +3505,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description='PicVault web browser')
     parser.add_argument('--work', default='/Volumes/Storage')
-    parser.add_argument('--host', default='0.0.0.0')
+    parser.add_argument(
+        '--host', default='127.0.0.1',
+        help='Bind address (default 127.0.0.1; pass 0.0.0.0 for LAN)',
+    )
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
 
@@ -2387,6 +3518,13 @@ def main():
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
+    if args.host in ('0.0.0.0', '::', '[::]'):
+        print(
+            f"WARNING: binding to {args.host} exposes the gallery on all "
+            f"interfaces. Prefer --host 127.0.0.1 unless you need LAN access.",
+            file=sys.stderr,
+        )
+
     thumb_root = work / THUMB_CACHE
     thumb_root.mkdir(parents=True, exist_ok=True)
     ensure_work_dirs(work)
@@ -2394,36 +3532,34 @@ def main():
     Handler.work = work
     Handler.thumb_root = thumb_root
 
-    # Build argv factories. Args are baked-in; no user input flows in.
+    # Build argv factories: each takes a sandbox-validated backup path.
     w = str(work)
-    b = BACKUP_DEFAULT
     pb = str(PICVAULT_BIN)
-
-    def _vlog(extra, dry=True):
-        # helper for dry/apply variants
-        pass  # placeholder; see explicit entries below
 
     RUN_COMMANDS.update({
         # --- read-only / status ---
-        'status':       lambda: [pb, 'status'],
-        'doctor':       lambda: [pb, 'doctor'],
+        'status':       lambda _b: [pb, 'status'],
+        'doctor':       lambda _b: [pb, 'doctor'],
 
         # --- init / web lifecycle ---
-        'init':         lambda: ['bash', str(INIT_SCRIPT), '--work', w],
-        'web_start':    lambda: [pb, 'web', 'start'],
-        'web_stop':     lambda: [pb, 'web', 'stop'],
+        'init':         lambda _b: ['bash', str(INIT_SCRIPT), '--work', w],
+        'web_start':    lambda _b: [pb, 'web', 'start'],
+        'web_stop':     lambda _b: [pb, 'web', 'stop'],
 
         # --- dedupe (dry-run by default; apply moves files) ---
-        'dedupe_dry':   lambda: ['python3', str(DEDUPE_SCRIPT), '--work', w, '--dry-run'],
-        'dedupe_apply': lambda: ['python3', str(DEDUPE_SCRIPT), '--work', w],
+        'dedupe_dry':   lambda _b: ['python3', str(DEDUPE_SCRIPT), '--work', w, '--dry-run'],
+        'dedupe_apply': lambda _b: ['python3', str(DEDUPE_SCRIPT), '--work', w],
 
         # --- rename + organize ---
-        'rename_dry':   lambda: ['python3', str(RENAME_SCRIPT), '--work', w, '--dry-run'],
-        'rename_apply': lambda: ['python3', str(RENAME_SCRIPT), '--work', w],
+        'rename_dry':   lambda _b: ['python3', str(RENAME_SCRIPT), '--work', w, '--dry-run'],
+        'rename_apply': lambda _b: ['python3', str(RENAME_SCRIPT), '--work', w],
 
         # --- sync to backup (rsync; apply really mirrors) ---
-        'sync_verify':  lambda: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify', '--dry-run'],
-        'sync_apply':   lambda: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify'],
+        'sync_verify':  lambda b: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify', '--dry-run'],
+        'sync_apply':   lambda b: ['bash', str(SYNC_SCRIPT), '--work', w, '--backup', b, '--verify'],
+
+        # --- one-shot pipeline (picvault uses WORK/BACKUP from env) ---
+        'pipeline':     lambda _b: [pb, 'pipeline', '--yes'],
     })
 
     # Try to get hostname for display
@@ -2431,17 +3567,28 @@ def main():
     hostname = socket.gethostname()
     if not hostname.endswith('.local'):
         hostname = hostname + '.local'
-    url = f"http://{hostname}:{args.port}/"
+    if args.host in ('127.0.0.1', 'localhost', '::1'):
+        url = f"http://127.0.0.1:{args.port}/"
+    else:
+        url = f"http://{hostname}:{args.port}/"
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     # OSC 8 hyperlink: makes the URL clickable in iTerm2, Terminal.app 12.5+, WezTerm, etc.
     # Falls back to plain text in older terminals.
     OSC8_START = '\033]8;;'
     OSC8_END = '\033]8;;\033\\'
+    try:
+        code_mtime = datetime.fromtimestamp(
+            Path(__file__).stat().st_mtime
+        ).isoformat(timespec='seconds')
+    except OSError:
+        code_mtime = '?'
     print(f"✓ PicVault web at {OSC8_START}{url}{OSC8_END}{url}\033[0m")
     print(f"  Work: {work}")
     print(f"  Thumbnails: {thumb_root}")
+    print(f"  Code: {Path(__file__).resolve()} (mtime {code_mtime})")
     print(f"  Press Ctrl-C to stop")
+    print(f"  Note: edit web_browse.py → restart this process (no auto-reload)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
