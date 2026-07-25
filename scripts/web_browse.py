@@ -501,67 +501,6 @@ def bucket_display_name(name: str) -> str:
     return name
 
 
-def peek_bucket_previews(work: Path, year: str, bucket: str, limit: int = 3) -> list[str]:
-    """Cheap photo previews for ledger rows (relative paths). Prefer stills."""
-    if limit <= 0:
-        return []
-    month_dir = work / 'by-date' / year / bucket
-    photos = month_dir / 'photos'
-    out: list[str] = []
-    if photos.is_dir():
-        try:
-            entries = sorted(photos.iterdir(), key=lambda p: p.name)
-        except OSError:
-            entries = []
-        for f in entries:
-            if not is_user_media_file(f):
-                continue
-            if f.suffix.lower() in VIDEO_EXTS:
-                continue
-            out.append(str(f.relative_to(work)))
-            if len(out) >= limit:
-                return out
-    if len(out) >= limit:
-        return out[:limit]
-    videos = month_dir / 'videos'
-    if videos.is_dir():
-        try:
-            entries = sorted(videos.iterdir(), key=lambda p: p.name)
-        except OSError:
-            entries = []
-        for f in entries:
-            if is_user_media_file(f):
-                out.append(str(f.relative_to(work)))
-                if len(out) >= limit:
-                    break
-    return out[:limit]
-
-
-def peek_year_previews(work: Path, year: str, months: list, limit: int = 3) -> list[str]:
-    """Up to `limit` previews across a year's non-empty buckets (newest first)."""
-    out: list[str] = []
-    ordered = sorted(months, key=lambda m: m.get('name') or '', reverse=True)
-    for m in ordered:
-        if int(m.get('photos') or 0) + int(m.get('videos') or 0) <= 0:
-            continue
-        need = limit - len(out)
-        if need <= 0:
-            break
-        out.extend(peek_bucket_previews(work, year, m['name'], limit=need))
-    return out[:limit]
-
-
-def ledger_previews_html(rels: list[str]) -> str:
-    if not rels:
-        return ''
-    imgs = []
-    for rel in rels:
-        q = urllib.parse.quote(rel)
-        imgs.append(
-            f'<img src="/thumb?p={_esc(q)}" alt="" loading="lazy" decoding="async">'
-        )
-    return f'<span class="ledger-previews" aria-hidden="true">{"".join(imgs)}</span>'
-
 
 
 # Short TTL caches for ThreadingHTTPServer (lock around dict mutations).
@@ -1281,24 +1220,6 @@ body.select-mode .toolbar-organize { display: flex; }
 }
 @media (hover: none) {
   .ledger-sync { opacity: 0.85; border-color: var(--line); }
-}
-.ledger-key-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.ledger-previews {
-  display: inline-flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.ledger-previews img {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  background: var(--mist);
-  display: block;
 }
 .ledger-go {
   font-family: var(--sans);
@@ -2312,11 +2233,9 @@ def render_home(work: Path) -> bytes:
         stats = format_ledger_stats(
             total_photos, total_videos, total_stars, total_lives
         )
-        previews = ledger_previews_html(peek_year_previews(work, year, months, limit=3))
         rows.append(
             f'<a class="ledger-row" href="/y/{_esc(year)}">'
-            f'<span class="ledger-key-wrap">'
-            f'<span class="ledger-key">{_esc(year)}</span>{previews}</span>'
+            f'<span class="ledger-key">{_esc(year)}</span>'
             f'<span class="ledger-sub">{sub}</span>'
             f'<span class="ledger-stats">{stats}</span>'
             f'<span class="ledger-go" aria-hidden="true">›</span>'
@@ -2375,15 +2294,9 @@ def render_year(work: Path, year: str) -> bytes:
         empty = photo_count == 0 and video_count == 0
         row_cls = 'ledger-row is-empty' if empty else 'ledger-row'
         sub_html = f'<span class="ledger-sub">{_esc(sub)}</span>' if sub else '<span class="ledger-sub"></span>'
-        previews = ''
-        if not empty:
-            previews = ledger_previews_html(
-                peek_bucket_previews(work, year, m.name, limit=3)
-            )
         row = (
             f'<a class="{row_cls}" href="{_esc(href)}">'
-            f'<span class="ledger-key-wrap">'
-            f'<span class="ledger-key">{_esc(key)}</span>{previews}</span>'
+            f'<span class="ledger-key">{_esc(key)}</span>'
             f'{sub_html}'
             f'<span class="ledger-stats">{stats}</span>'
             f'<span class="ledger-go" aria-hidden="true">›</span>'
