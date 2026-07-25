@@ -2020,6 +2020,151 @@ def test_perf_quick_wins_cache_and_thumb_headers():
         )
 
 
+def test_gallery_pagination():
+    """Large galleries emit first page only; /api/gallery returns further pages."""
+    print('\n28. Gallery pagination (HTML cap + /api/gallery)')
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    import threading
+
+    check('GALLERY_PAGE_SIZE in 100–200', 100 <= wb.GALLERY_PAGE_SIZE <= 200)
+    check('PAGE_JS has loadMoreGallery', 'function loadMoreGallery' in wb.PAGE_JS)
+    check('PAGE_JS has /api/gallery', '/api/gallery' in wb.PAGE_JS)
+    check(
+        'filter tip copy',
+        '筛选仅当前已加载' in wb._gallery_toolbar(1, 0, paginated=True),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        shots = work / 'screenshots'
+        shots.mkdir(parents=True)
+        n = wb.GALLERY_PAGE_SIZE + 25
+        for i in range(n):
+            p = shots / f'screenshot_{i:04d}.jpg'
+            p.write_bytes(b'x' + str(i).encode())
+            # Distinct mtimes so newest (n-1) sorts first (list_screenshots).
+            os.utime(p, (1_700_000_000 + i, 1_700_000_000 + i))
+        thumbs = work / '_meta' / 'thumbs'
+        thumbs.mkdir(parents=True, exist_ok=True)
+
+        html = wb.render_screenshots(work, thumbs).decode('utf-8')
+        cell_n = len(re.findall(r'class="cell(?: starred)?"', html))
+        check(
+            'screenshots HTML capped to page size',
+            cell_n == wb.GALLERY_PAGE_SIZE,
+            detail=f'cells={cell_n} page={wb.GALLERY_PAGE_SIZE} total={n}',
+        )
+        check('screenshots has load more', 'data-load-more' in html and '加载更多' in html)
+        check('screenshots has filter tip', '筛选仅当前已加载' in html)
+        check('screenshots count shows total', f'{n} 个文件' in html)
+        # list_screenshots sorts by mtime desc → newest (n-1) on page 1; oldest (0) on last page
+        check(
+            'first page includes newest file',
+            f'screenshot_{n - 1:04d}.jpg' in html,
+        )
+        check(
+            'first page excludes oldest file',
+            'screenshot_0000.jpg' not in html,
+        )
+
+        # Small gallery: no pagination chrome
+        things = work / 'things'
+        things.mkdir(parents=True)
+        (things / 'things_20240715_aaaa.jpg').write_bytes(b't')
+        small = wb.render_things(work, thumbs).decode('utf-8')
+        check(
+            'small gallery no load more',
+            'id="loadMoreBtn"' not in small and 'data-has-more="1"' not in small,
+        )
+        check('small gallery has cell', 'things_20240715_aaaa.jpg' in small)
+
+        # Bucket pagination
+        photos = work / 'by-date' / '2026' / '2026-07' / 'photos'
+        photos.mkdir(parents=True)
+        for i in range(wb.GALLERY_PAGE_SIZE + 3):
+            (photos / f'20260701_120000_iphone_{i:04x}.jpg').write_bytes(b'p')
+        bucket_html = wb.render_bucket(work, '2026', '2026-07', thumbs).decode('utf-8')
+        bucket_cells = len(re.findall(r'class="cell(?: starred)?"', bucket_html))
+        check(
+            'bucket HTML capped',
+            bucket_cells == wb.GALLERY_PAGE_SIZE,
+            detail=str(bucket_cells),
+        )
+        check('bucket data-gallery-kind', 'data-gallery-kind="bucket"' in bucket_html)
+
+        class H(wb.Handler):
+            pass
+
+        H.work = work
+        H.thumb_root = thumbs
+        httpd = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            url = (
+                f'http://127.0.0.1:{port}/api/gallery?'
+                f'kind=screenshots&offset={wb.GALLERY_PAGE_SIZE}'
+                f'&limit={wb.GALLERY_PAGE_SIZE}'
+            )
+            with urllib.request.urlopen(url) as r:
+                data = json.loads(r.read())
+            check('api gallery ok', data.get('ok') is True)
+            check('api gallery total', data.get('total') == n, detail=str(data.get('total')))
+            check(
+                'api gallery count',
+                data.get('count') == 25,
+                detail=str(data.get('count')),
+            )
+            check('api gallery has_more false', data.get('has_more') is False)
+            check(
+                'api gallery html has oldest file',
+                'screenshot_0000.jpg' in (data.get('html') or ''),
+            )
+            check(
+                'api gallery html has no newest file',
+                f'screenshot_{n - 1:04d}.jpg' not in (data.get('html') or ''),
+            )
+
+            burl = (
+                f'http://127.0.0.1:{port}/api/gallery?'
+                f'kind=bucket&year=2026&month=2026-07'
+                f'&offset={wb.GALLERY_PAGE_SIZE}&limit=10'
+            )
+            with urllib.request.urlopen(burl) as r:
+                bdata = json.loads(r.read())
+            check('api bucket ok', bdata.get('ok') is True)
+            check('api bucket has_more false', bdata.get('has_more') is False)
+            check(
+                'api bucket count 3',
+                bdata.get('count') == 3,
+                detail=str(bdata.get('count')),
+            )
+
+            bad = urllib.request.Request(
+                f'http://127.0.0.1:{port}/api/gallery?'
+                + urllib.parse.urlencode({
+                    'kind': 'bucket',
+                    'year': '2026',
+                    'month': '../etc',
+                    'offset': '0',
+                })
+            )
+            try:
+                with urllib.request.urlopen(bad) as r:
+                    bad_body = json.loads(r.read())
+                check('bad month rejected', bad_body.get('ok') is False)
+            except urllib.error.HTTPError as e:
+                bad_body = json.loads(e.read())
+                check('bad month HTTP 400', e.code == 400)
+                check('bad month rejected body', bad_body.get('ok') is False)
+        finally:
+            httpd.shutdown()
+
+
 def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
@@ -2052,6 +2197,7 @@ def main():
     test_theme_start_month_reassign_and_validate()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
+    test_gallery_pagination()
     print(f'\n{passed} passed, {failed} failed')
     sys.exit(1 if failed else 0)
 

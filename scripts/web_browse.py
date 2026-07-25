@@ -37,6 +37,9 @@ RUN_TIMEOUT_SEC = None  # 不超时；长任务实质不限时
 # 仅当 RUN_TIMEOUT_SEC 为 None 时作为极长兜底；再设为 None 则完全无限
 RUN_HARD_CAP_SEC = 7 * 24 * 3600
 MAX_POST_BODY = 2 * 1024 * 1024  # 2 MiB
+# Large galleries (screenshots etc.) paginate so HTML/DOM stay bounded.
+GALLERY_PAGE_SIZE = 150
+GALLERY_PAGE_SIZE_MAX = 500
 MONTH_SEGMENT_RE = re.compile(r'^\d{4}-\d{2}(_[^/\\]+)?$')
 # Star bucket names: alnum / . _ - / CJK (theme dirs like 2026-07_海南)
 _STAR_BUCKET_SAFE_RE = re.compile(
@@ -732,6 +735,59 @@ def list_all_starred(work: Path) -> list[tuple]:
     return items
 
 
+def list_gallery_entries(work: Path, kind: str, year: str = None,
+                         month: str = None) -> list[tuple]:
+    """Gallery entries as [(Path, star_bucket), ...] for paginated render/API.
+
+    ``kind``: bucket | screenshots | screenrecords | docs | things | starred
+    """
+    if kind == 'bucket':
+        if not year or not month:
+            return []
+        return [(f, month) for f in list_bucket(work, year, month)]
+    if kind == 'screenshots':
+        return [(f, 'screenshots') for f in list_screenshots(work)]
+    if kind == 'screenrecords':
+        return [(f, 'screenrecords') for f in list_screenrecords(work)]
+    if kind == 'docs':
+        return [(f, 'docs') for f in list_docs(work)]
+    if kind == 'things':
+        return [(f, 'things') for f in list_things(work)]
+    if kind == 'starred':
+        return [(path, bucket) for path, bucket, _rel in list_all_starred(work)]
+    return []
+
+
+def gallery_stars_map(work: Path, kind: str, entries: list[tuple]) -> dict:
+    """Star lookup for gallery cells (rel_path → True)."""
+    if kind == 'starred':
+        return {str(path.relative_to(work)): True for path, _bucket in entries}
+    if not entries:
+        return {}
+    bucket = entries[0][1]
+    return load_stars(work, bucket)
+
+
+def clamp_gallery_limit(raw_limit) -> int:
+    try:
+        n = int(raw_limit)
+    except (TypeError, ValueError):
+        return GALLERY_PAGE_SIZE
+    if n < 1:
+        return GALLERY_PAGE_SIZE
+    return min(n, GALLERY_PAGE_SIZE_MAX)
+
+
+def clamp_gallery_offset(raw_offset, total: int) -> int:
+    try:
+        n = int(raw_offset)
+    except (TypeError, ValueError):
+        return 0
+    if n < 0:
+        return 0
+    return min(n, max(total, 0))
+
+
 def load_stars(work: Path, bucket: str) -> dict:
     """Load stars JSON, returning dict {rel_path: True}."""
     try:
@@ -1137,6 +1193,41 @@ body.select-mode .toolbar-organize { display: flex; }
   color: var(--ink);
   min-width: 4.5em;
 }
+.toolbar .filter-tip {
+  font-family: var(--sans);
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-left: 6px;
+  letter-spacing: 0.02em;
+}
+.gallery-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 48px;
+}
+.gallery-more-tip {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+.btn-more {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 10px 28px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.btn-more:hover { background: var(--paper); border-color: var(--ink); }
+.btn-more.busy { opacity: 0.45; pointer-events: none; }
 
 .ledger {
   border-top: 1px solid var(--line);
@@ -1614,7 +1705,7 @@ body.select-mode .cell .fname {
   .star.pulse { animation: none; }
   .page-in { animation: none; }
   html { scroll-behavior: auto; }
-  .chip, .btn-reclass, .btn-trash, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
+  .chip, .btn-reclass, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
 '''
 
@@ -1631,6 +1722,26 @@ PAGE_JS = '''
     toastEl.classList.add('show');
     clearTimeout(toastEl._t);
     toastEl._t = setTimeout(function () { toastEl.classList.remove('show'); }, 1800);
+  }
+
+  function gallerySheet() {
+    return document.getElementById('sheet');
+  }
+
+  function galleryStillPaging() {
+    var sheet = gallerySheet();
+    return !!(sheet && sheet.getAttribute('data-has-more') === '1');
+  }
+
+  function setStarTotal(n) {
+    var sheet = gallerySheet();
+    if (sheet) sheet.setAttribute('data-star-total', String(Math.max(0, n)));
+    var el = document.getElementById('starCount');
+    if (el) el.textContent = String(Math.max(0, n));
+    var chipN = document.querySelector('[data-filter="starred"] .n');
+    if (chipN) chipN.textContent = String(Math.max(0, n));
+    var meta = document.getElementById('pageMetaStars');
+    if (meta) meta.textContent = String(Math.max(0, n));
   }
 
   async function toggleStar(btn) {
@@ -1657,7 +1768,13 @@ PAGE_JS = '''
       applyStarState(path, data.starred);
       btn.classList.add('pulse');
       setTimeout(function () { btn.classList.remove('pulse'); }, 350);
-      syncStarCount();
+      var sheet = gallerySheet();
+      if (sheet && sheet.getAttribute('data-star-total') != null) {
+        var cur = parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0;
+        setStarTotal(cur + (data.starred ? 1 : -1));
+      } else {
+        syncStarCount();
+      }
       applyFilter();
     } catch (err) {
       toast('网络错误：' + err);
@@ -1682,6 +1799,13 @@ PAGE_JS = '''
   }
 
   function syncStarCount() {
+    // Paginated galleries keep server star totals on data-star-total (DOM is partial).
+    var sheet = gallerySheet();
+    if (sheet && sheet.getAttribute('data-star-total') != null) {
+      var total = parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0;
+      setStarTotal(total);
+      return;
+    }
     var n = document.querySelectorAll('.cell.starred').length;
     var el = document.getElementById('starCount');
     if (el) el.textContent = String(n);
@@ -1794,6 +1918,69 @@ PAGE_JS = '''
     });
   }
 
+  var galleryLoading = false;
+  async function loadMoreGallery() {
+    var sheet = gallerySheet();
+    if (!sheet || sheet.getAttribute('data-has-more') !== '1' || galleryLoading) return;
+    var btn = document.getElementById('loadMoreBtn');
+    galleryLoading = true;
+    if (btn) btn.classList.add('busy');
+    try {
+      var kind = sheet.getAttribute('data-gallery-kind') || '';
+      var offset = parseInt(sheet.getAttribute('data-offset') || '0', 10) || 0;
+      var limit = parseInt(sheet.getAttribute('data-page-size') || '150', 10) || 150;
+      var qs = new URLSearchParams();
+      qs.set('kind', kind);
+      qs.set('offset', String(offset));
+      qs.set('limit', String(limit));
+      var year = sheet.getAttribute('data-year');
+      var month = sheet.getAttribute('data-month');
+      if (year) qs.set('year', year);
+      if (month) qs.set('month', month);
+      var r = await fetch('/api/gallery?' + qs.toString());
+      var data = await r.json();
+      if (!data.ok) {
+        toast('加载失败：' + (data.error || 'unknown'));
+        return;
+      }
+      if (data.html) sheet.insertAdjacentHTML('beforeend', data.html);
+      var next = data.next_offset != null ? data.next_offset : (offset + (data.count || 0));
+      sheet.setAttribute('data-offset', String(next));
+      sheet.setAttribute('data-has-more', data.has_more ? '1' : '0');
+      if (data.star_count != null) {
+        sheet.setAttribute('data-star-total', String(data.star_count));
+        setStarTotal(data.star_count);
+      }
+      var tip = document.querySelector('.gallery-more-tip');
+      var total = data.total != null ? data.total : (parseInt(sheet.getAttribute('data-total') || '0', 10) || 0);
+      if (tip) {
+        tip.textContent = data.has_more
+          ? ('已显示 ' + next + ' / ' + total + ' · 筛选仅作用于已加载')
+          : ('已全部加载 ' + total + ' 个');
+      }
+      if (!data.has_more && btn) btn.hidden = true;
+      applyFilter();
+    } catch (err) {
+      toast('网络错误：' + err);
+    } finally {
+      galleryLoading = false;
+      if (btn) btn.classList.remove('busy');
+    }
+  }
+
+  function setupGalleryPaging() {
+    var more = document.getElementById('galleryMore');
+    if (!more || !galleryStillPaging()) return;
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        if (entries.some(function (e) { return e.isIntersecting; })) {
+          loadMoreGallery();
+        }
+      }, { rootMargin: '240px 0px' });
+      io.observe(more);
+    }
+  }
+
   document.addEventListener('change', function (e) {
     var pick = e.target.closest('.pick');
     if (!pick) return;
@@ -1817,6 +2004,12 @@ PAGE_JS = '''
     }
     if (e.target.closest('.pick')) {
       e.stopPropagation();
+      return;
+    }
+    var loadMore = e.target.closest('[data-load-more]');
+    if (loadMore) {
+      e.preventDefault();
+      loadMoreGallery();
       return;
     }
     var re = e.target.closest('[data-reclassify]');
@@ -1963,6 +2156,12 @@ PAGE_JS = '''
     lb.classList.remove('open');
     var media = lb.querySelector('.lb-media');
     if (media) media.innerHTML = '';
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupGalleryPaging);
+  } else {
+    setupGalleryPaging();
   }
 })();
 '''
@@ -2158,7 +2357,8 @@ def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
     )
 
 
-def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') -> str:
+def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
+                     paginated: bool = False) -> str:
     """context: normal | theme | screen | docs | things — hide the button for the current bucket."""
     actions = []
     if context == 'theme':
@@ -2190,6 +2390,12 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
         '<button type="button" class="btn-trash" data-trash="1" disabled>'
         '移至回收站</button>'
     )
+    filter_tip = (
+        '<span class="filter-tip" title="「仅加星」与格子筛选只作用于当前已加载的缩略图；'
+        '点「加载更多」或滚动到底可继续加载。">'
+        '筛选仅当前已加载</span>'
+        if paginated else ''
+    )
     return (
         f'<div class="toolbar">'
         f'<span class="count">{file_count} 个文件 · '
@@ -2200,6 +2406,7 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
         f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
         f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
         f'aria-pressed="false">选择</button>'
+        f'{filter_tip}'
         f'</div>'
         f'<div class="toolbar-organize" aria-label="整理">'
         f'<span class="sel-count" id="selCount"></span>'
@@ -2207,6 +2414,113 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
         f'</div>'
         f'</div>'
     )
+
+
+def _gallery_cells_html(entries: list[tuple], work: Path, thumb_root: Path,
+                        stars: dict, start_index: int = 1) -> str:
+    """Render consecutive gallery cells; ``entries`` is [(Path, bucket), ...]."""
+    parts = []
+    for i, (path, bucket) in enumerate(entries):
+        parts.append(
+            _media_cell(path, work, thumb_root, bucket, stars, start_index + i)
+        )
+    return ''.join(parts)
+
+
+def _gallery_sheet_html(
+    entries: list[tuple],
+    work: Path,
+    thumb_root: Path,
+    stars: dict,
+    kind: str,
+    year: str = None,
+    month: str = None,
+    empty_message: str = '这个桶里还没有文件。',
+) -> str:
+    """First page of a gallery sheet + optional「加载更多」footer."""
+    total = len(entries)
+    if total == 0:
+        return (
+            f'<div class="ledger"><div class="ledger-empty">{_esc(empty_message)}'
+            f'</div></div>'
+        )
+    page = entries[:GALLERY_PAGE_SIZE]
+    loaded = len(page)
+    has_more = total > loaded
+    cells = _gallery_cells_html(page, work, thumb_root, stars, start_index=1)
+    attrs = [
+        f'data-gallery-kind="{_esc(kind)}"',
+        f'data-offset="{loaded}"',
+        f'data-total="{total}"',
+        f'data-page-size="{GALLERY_PAGE_SIZE}"',
+        f'data-has-more="{"1" if has_more else "0"}"',
+        f'data-star-total="{len(stars)}"',
+    ]
+    if year:
+        attrs.append(f'data-year="{_esc(year)}"')
+    if month:
+        attrs.append(f'data-month="{_esc(month)}"')
+    more = ''
+    if has_more:
+        more = (
+            '<div class="gallery-more" id="galleryMore">'
+            f'<p class="gallery-more-tip">已显示 {loaded} / {total}'
+            ' · 筛选仅作用于已加载</p>'
+            '<button type="button" class="btn-more" id="loadMoreBtn" data-load-more>'
+            '加载更多</button>'
+            '</div>'
+        )
+    return (
+        f'<div class="sheet" id="sheet" {" ".join(attrs)}>{cells}</div>'
+        f'{more}'
+    )
+
+
+def build_gallery_page_payload(
+    work: Path,
+    thumb_root: Path,
+    kind: str,
+    offset: int = 0,
+    limit: int = None,
+    year: str = None,
+    month: str = None,
+) -> dict:
+    """JSON payload for GET /api/gallery (HTML cell fragments for one page)."""
+    if kind not in (
+        'bucket', 'screenshots', 'screenrecords', 'docs', 'things', 'starred',
+    ):
+        return {'ok': False, 'error': 'unknown kind'}
+    if kind == 'bucket':
+        if not year or not re.fullmatch(r'\d{4}', str(year)):
+            return {'ok': False, 'error': 'year required (YYYY)'}
+        if not month or not is_safe_month_segment(month):
+            return {'ok': False, 'error': 'invalid month'}
+        year_dir = (work / 'by-date' / year).resolve()
+        month_dir = (work / 'by-date' / year / month).resolve()
+        if not path_is_under(month_dir, year_dir):
+            return {'ok': False, 'error': 'path not allowed'}
+    entries = list_gallery_entries(work, kind, year=year, month=month)
+    total = len(entries)
+    limit = clamp_gallery_limit(limit if limit is not None else GALLERY_PAGE_SIZE)
+    offset = clamp_gallery_offset(offset, total)
+    page = entries[offset:offset + limit]
+    stars = gallery_stars_map(work, kind, entries)
+    html = _gallery_cells_html(
+        page, work, thumb_root, stars, start_index=offset + 1,
+    )
+    next_offset = offset + len(page)
+    return {
+        'ok': True,
+        'kind': kind,
+        'total': total,
+        'offset': offset,
+        'limit': limit,
+        'count': len(page),
+        'next_offset': next_offset,
+        'has_more': next_offset < total,
+        'html': html,
+        'star_count': len(stars),
+    }
 
 
 def render_home(work: Path) -> bytes:
@@ -2366,16 +2680,13 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     is_themed = '_' in month
     display = bucket_display_name(month)
     gallery_ctx = 'theme' if is_themed else 'normal'
-    files = list_bucket(work, year, month)
-    stars = load_stars(work, bucket_name)
-    cells = [
-        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
-        for i, f in enumerate(files)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">这个桶里还没有文件。</div></div>'
+    entries = list_gallery_entries(work, 'bucket', year=year, month=month)
+    stars = gallery_stars_map(work, 'bucket', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='bucket',
+        year=year, month=month,
+        empty_message='这个桶里还没有文件。',
     )
     meta = year
     if is_themed:
@@ -2389,7 +2700,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">{_esc(display)}</h2>'
         f'<p class="page-meta">{_esc(meta)}</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context=gallery_ctx)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context=gallery_ctx, paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2405,24 +2716,19 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
 
 
 def render_screenshots(work: Path, thumb_root: Path) -> bytes:
-    files = list_screenshots(work)
-    bucket_name = 'screenshots'
-    stars = load_stars(work, bucket_name)
-    cells = [
-        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
-        for i, f in enumerate(files)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">没有截图。</div></div>'
+    entries = list_gallery_entries(work, 'screenshots')
+    stars = gallery_stars_map(work, 'screenshots', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='screenshots',
+        empty_message='没有截图。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
         f'<p class="page-meta">手机截图</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context="screen")}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2434,24 +2740,19 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
 
 
 def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
-    files = list_screenrecords(work)
-    bucket_name = 'screenrecords'
-    stars = load_stars(work, bucket_name)
-    cells = [
-        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
-        for i, f in enumerate(files)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">没有录屏。</div></div>'
+    entries = list_gallery_entries(work, 'screenrecords')
+    stars = gallery_stars_map(work, 'screenrecords', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='screenrecords',
+        empty_message='没有录屏。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">录屏</h2>'
         f'<p class="page-meta">屏幕录制</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context="screen")}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2463,24 +2764,19 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
 
 
 def render_docs(work: Path, thumb_root: Path) -> bytes:
-    files = list_docs(work)
-    bucket_name = 'docs'
-    stars = load_stars(work, bucket_name)
-    cells = [
-        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
-        for i, f in enumerate(files)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">没有文档照片。</div></div>'
+    entries = list_gallery_entries(work, 'docs')
+    stars = gallery_stars_map(work, 'docs', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='docs',
+        empty_message='没有文档照片。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">文档</h2>'
         f'<p class="page-meta">证件、票据等，手动移入</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context="docs")}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2492,24 +2788,19 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
 
 
 def render_things(work: Path, thumb_root: Path) -> bytes:
-    files = list_things(work)
-    bucket_name = 'things'
-    stars = load_stars(work, bucket_name)
-    cells = [
-        _media_cell(f, work, thumb_root, bucket_name, stars, i + 1)
-        for i, f in enumerate(files)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">没有物品照片。</div></div>'
+    entries = list_gallery_entries(work, 'things')
+    stars = gallery_stars_map(work, 'things', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='things',
+        empty_message='没有物品照片。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">物品</h2>'
         f'<p class="page-meta">物品照片与视频，手动移入</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(files), len(stars), context="things")}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2522,24 +2813,19 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
 
 def render_starred(work: Path, thumb_root: Path) -> bytes:
     """Unified gallery of every starred file across buckets."""
-    items = list_all_starred(work)
-    stars_map = {rel: True for _, _, rel in items}
-    cells = [
-        _media_cell(path, work, thumb_root, bucket, stars_map, i + 1)
-        for i, (path, bucket, _rel) in enumerate(items)
-    ]
-    sheet = (
-        f'<div class="sheet" id="sheet">{"".join(cells)}</div>'
-        if cells else
-        '<div class="ledger"><div class="ledger-empty">'
-        '还没有加星。在各库里点 ★，或点「仅加星」筛选。</div></div>'
+    entries = list_gallery_entries(work, 'starred')
+    stars = gallery_stars_map(work, 'starred', entries)
+    paginated = len(entries) > GALLERY_PAGE_SIZE
+    sheet = _gallery_sheet_html(
+        entries, work, thumb_root, stars, kind='starred',
+        empty_message='还没有加星。在各库里点 ★，或点「仅加星」筛选。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">加星</h2>'
-        f'<p class="page-meta">{len(items)} 张已加星</p>'
+        f'<p class="page-meta">{len(entries)} 张已加星</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(items), len(items), context="starred")}'
+        f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated)}'
         f'{sheet}'
     )
     return page_shell(
@@ -2963,6 +3249,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_thumb(p)
             elif path == '/api/star':
                 self._handle_star_api(qs)
+            elif path == '/api/gallery':
+                kind = (qs.get('kind') or [''])[0]
+                year = (qs.get('year') or [''])[0] or None
+                month = (qs.get('month') or [''])[0] or None
+                if month:
+                    month = urllib.parse.unquote(month)
+                offset = (qs.get('offset') or ['0'])[0]
+                limit = (qs.get('limit') or [str(GALLERY_PAGE_SIZE)])[0]
+                payload = build_gallery_page_payload(
+                    self.work,
+                    self.thumb_root,
+                    kind,
+                    offset=offset,
+                    limit=limit,
+                    year=year,
+                    month=month,
+                )
+                status = 200 if payload.get('ok') else 400
+                self._send_json(payload, status=status)
             else:
                 self._send(html_error_page('未找到', '没有这个页面。'), 'text/html', 404)
         except Exception as e:
