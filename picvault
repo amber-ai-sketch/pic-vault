@@ -162,6 +162,7 @@ Web UI:
   web restart                   Restart
   web logs [--follow]           Show web UI logs
   web open                      Open web UI in default browser
+  boot start                    Local helper so dashboard「启动」can spawn web (127.0.0.1:8764)
 
 Star / favorites:
   star <bucket> <file>         Mark a file as starred (terminal-friendly)
@@ -370,6 +371,21 @@ cmd_web() {
         *)
             err "Unknown web action: $action"
             info "Try: picvault web {start|stop|restart|status|logs|open}"
+            return 1
+            ;;
+    esac
+}
+
+# === boot helper (file:// dashboard one-click start) ===
+cmd_boot() {
+    local action="${1:-start}"
+    case "$action" in
+        start)
+            exec python3 "$SCRIPTS_DIR/dashboard_boot.py"
+            ;;
+        *)
+            err "Unknown boot action: $action"
+            info "Try: picvault boot start"
             return 1
             ;;
     esac
@@ -708,6 +724,9 @@ main() {
             ;;
         web)
             cmd_web "$@"
+            ;;
+        boot)
+            cmd_boot "$@"
             ;;
         star)
             cmd_star "$@"

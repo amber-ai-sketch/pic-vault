@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import email.utils
 import html as html_lib
 import json
 import mimetypes
@@ -50,7 +51,17 @@ DEDUPE_SCRIPT = SCRIPT_DIR / 'dedupe.py'
 RENAME_SCRIPT = SCRIPT_DIR / 'rename_organize.py'
 SYNC_SCRIPT = SCRIPT_DIR / 'sync_to_backup.sh'
 INIT_SCRIPT = SCRIPT_DIR / 'init_storage.sh'
+DASHBOARD_HTML = PROJECT_ROOT / 'outputs' / 'dashboard.html'
 BACKUP_DEFAULT = '/Volumes/WD4T/MediaVault'
+
+
+def dashboard_file_path() -> str:
+    return str(DASHBOARD_HTML.resolve())
+
+
+def dashboard_file_url() -> str:
+    """file:// URL for outputs/dashboard.html (控制台)."""
+    return DASHBOARD_HTML.resolve().as_uri()
 
 EMPTY_EVENTS_YAML = """# 主题配置（rename_organize / Web /themes）
 # 也可用：./scripts/add_theme.py --interactive
@@ -394,10 +405,15 @@ def gen_thumbnail(src: Path, dst: Path, size=320) -> bool:
 
 
 def thumb_for(file_path: Path, work: Path, thumb_root: Path) -> Path:
-    """Get thumbnail path for a file (generates if missing)."""
-    rel = file_path.relative_to(work)
+    """Get thumbnail path for a file (generates if missing).
+
+    Hot path: existing valid JPEG thumb returns without mkdir. Parent dirs are
+    created only inside gen_thumbnail when a new thumb is written.
+    """
+    # Resolve both sides so macOS /var → /private/var (and safe_under_work's
+    # resolved path) still yields a stable rel under thumb_root.
+    rel = file_path.resolve().relative_to(work.resolve())
     thumb_path = thumb_root / rel.with_suffix('.jpg')
-    thumb_path.parent.mkdir(parents=True, exist_ok=True)
     if thumb_path.exists():
         if _is_jpeg_bytes(thumb_path):
             return thumb_path
@@ -473,6 +489,120 @@ def format_ledger_stats(photos: int, videos: int,
     return ' · '.join(parts)
 
 
+def bucket_month_key(name: str) -> str:
+    """YYYY-MM prefix of a by-date bucket folder name."""
+    return name.split('_', 1)[0] if '_' in name else name
+
+
+def bucket_display_name(name: str) -> str:
+    """Short gallery/ledger title: theme name or YYYY-MM (not full folder)."""
+    if '_' in name:
+        return name.split('_', 1)[1]
+    return name
+
+
+def peek_bucket_previews(work: Path, year: str, bucket: str, limit: int = 3) -> list[str]:
+    """Cheap photo previews for ledger rows (relative paths). Prefer stills."""
+    if limit <= 0:
+        return []
+    month_dir = work / 'by-date' / year / bucket
+    photos = month_dir / 'photos'
+    out: list[str] = []
+    if photos.is_dir():
+        try:
+            entries = sorted(photos.iterdir(), key=lambda p: p.name)
+        except OSError:
+            entries = []
+        for f in entries:
+            if not is_user_media_file(f):
+                continue
+            if f.suffix.lower() in VIDEO_EXTS:
+                continue
+            out.append(str(f.relative_to(work)))
+            if len(out) >= limit:
+                return out
+    if len(out) >= limit:
+        return out[:limit]
+    videos = month_dir / 'videos'
+    if videos.is_dir():
+        try:
+            entries = sorted(videos.iterdir(), key=lambda p: p.name)
+        except OSError:
+            entries = []
+        for f in entries:
+            if is_user_media_file(f):
+                out.append(str(f.relative_to(work)))
+                if len(out) >= limit:
+                    break
+    return out[:limit]
+
+
+def peek_year_previews(work: Path, year: str, months: list, limit: int = 3) -> list[str]:
+    """Up to `limit` previews across a year's non-empty buckets (newest first)."""
+    out: list[str] = []
+    ordered = sorted(months, key=lambda m: m.get('name') or '', reverse=True)
+    for m in ordered:
+        if int(m.get('photos') or 0) + int(m.get('videos') or 0) <= 0:
+            continue
+        need = limit - len(out)
+        if need <= 0:
+            break
+        out.extend(peek_bucket_previews(work, year, m['name'], limit=need))
+    return out[:limit]
+
+
+def ledger_previews_html(rels: list[str]) -> str:
+    if not rels:
+        return ''
+    imgs = []
+    for rel in rels:
+        q = urllib.parse.quote(rel)
+        imgs.append(
+            f'<img src="/thumb?p={_esc(q)}" alt="" loading="lazy" decoding="async">'
+        )
+    return f'<span class="ledger-previews" aria-hidden="true">{"".join(imgs)}</span>'
+
+
+
+# Short TTL caches for ThreadingHTTPServer (lock around dict mutations).
+# Correct enough for a personal vault; dashboard polls every ~5s so 10–15s
+# avoids full directory walks on every hit without feeling stale.
+_CACHE_LOCK = threading.Lock()
+_TOPBAR_CACHE_TTL = 15.0
+_STATUS_COUNTS_TTL = 10.0
+# work_key -> {'expires': float, 'sig': tuple, 'buckets': dict, 'star_n': int}
+_topbar_cache: dict = {}
+# work_key -> {'expires': float, 'sig': tuple, 'counts': dict}
+_status_counts_cache: dict = {}
+
+_TOPBAR_MTIME_ROOTS = (
+    'by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta/stars',
+)
+_STATUS_MTIME_ROOTS = (
+    'inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', 'things',
+    '_vlogs', '_trash', '_meta/stars',
+)
+
+
+def _dir_mtime_sig(work: Path, roots: tuple) -> tuple:
+    """Cheap invalidation hint from top-level dir mtimes (not a full tree walk)."""
+    parts = []
+    for name in roots:
+        p = work.joinpath(*name.split('/'))
+        try:
+            parts.append(p.stat().st_mtime_ns if p.exists() else 0)
+        except OSError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def clear_web_caches():
+    """Drop in-memory topbar/status caches (tests / after bulk mutations)."""
+    with _CACHE_LOCK:
+        _topbar_cache.clear()
+        _status_counts_cache.clear()
+
+
 def scan_buckets(work: Path) -> dict:
     """Scan by-date/, screenshots/, screenrecords/, docs/, things/ for bucket info."""
     result = {
@@ -531,6 +661,67 @@ def scan_buckets(work: Path) -> dict:
         )
 
     return result
+
+
+def get_topbar_stats(work: Path) -> tuple:
+    """Cached (star_n, buckets) for page_shell jumps; TTL + mtime of work roots."""
+    key = str(work.resolve()) if work.exists() else str(work)
+    now = time.monotonic()
+    sig = _dir_mtime_sig(work, _TOPBAR_MTIME_ROOTS)
+    with _CACHE_LOCK:
+        hit = _topbar_cache.get(key)
+        if hit and hit['expires'] > now and hit['sig'] == sig:
+            return hit['star_n'], hit['buckets']
+    star_n = len(list_all_starred(work))
+    buckets = scan_buckets(work)
+    with _CACHE_LOCK:
+        _topbar_cache[key] = {
+            'expires': now + _TOPBAR_CACHE_TTL,
+            'sig': sig,
+            'buckets': buckets,
+            'star_n': star_n,
+        }
+    return star_n, buckets
+
+
+def get_cached_scan_buckets(work: Path) -> dict:
+    """scan_buckets via topbar cache so home + page_shell share one walk."""
+    _, buckets = get_topbar_stats(work)
+    return buckets
+
+
+def get_status_counts(work: Path) -> dict:
+    """Cached count_files_in bundle for GET /api/status.
+
+    Dashboard setInterval(pollStatus, 5000) would otherwise full-walk inbox/
+    by-date/… on every poll. First call still computes; later hits within
+    _STATUS_COUNTS_TTL reuse the counts (invalidated by TTL or root mtimes).
+    """
+    key = str(work.resolve()) if work.exists() else str(work)
+    now = time.monotonic()
+    sig = _dir_mtime_sig(work, _STATUS_MTIME_ROOTS)
+    with _CACHE_LOCK:
+        hit = _status_counts_cache.get(key)
+        if hit and hit['expires'] > now and hit['sig'] == sig:
+            return dict(hit['counts'])
+    counts = {
+        'inbox': count_files_in(work / 'inbox'),
+        'by_date': count_files_in(work / 'by-date'),
+        'screenshots': count_files_in(work / 'screenshots'),
+        'screenrecords': count_files_in(work / 'screenrecords'),
+        'docs': count_files_in(work / 'docs'),
+        'things': count_files_in(work / 'things'),
+        'vlogs': count_files_in(work / '_vlogs'),
+        'trash': count_files_in(work / '_trash'),
+        'starred': count_starred(work),
+    }
+    with _CACHE_LOCK:
+        _status_counts_cache[key] = {
+            'expires': now + _STATUS_COUNTS_TTL,
+            'sig': sig,
+            'counts': counts,
+        }
+    return dict(counts)
 
 def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Path]:
     """List files in a specific month/theme bucket.
@@ -727,23 +918,25 @@ def _esc(s) -> str:
 
 PAGE_CSS = '''
 :root {
-  --paper: #FAFAF8;
-  --mist: #F0EFEC;
-  --ink: #141414;
-  --muted: #7A7872;
-  --line: #E4E2DC;
-  --live: #2F6F4E;
-  --warn: #9A6B1F;
+  --paper: #FFFFFF;
+  --mist: #F4F4F4;
+  --ink: #111111;
+  --muted: #6B6B6B;
+  --line: #E6E6E6;
+  --live: #1F7A4D;
+  --warn: #8A6A1F;
   --hazard: #9B2C2C;
   --bg: var(--paper);
   --soft: var(--mist);
+  --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   color: var(--ink);
   line-height: 1.5;
   background: var(--paper);
@@ -756,15 +949,15 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 28px 72px; }
 
 .brand-mark {
-  font-family: "Instrument Serif", serif;
-  font-style: italic;
-  font-weight: 400;
-  font-size: clamp(1.7rem, 3vw, 2.15rem);
-  letter-spacing: -0.02em;
+  font-family: var(--sans);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: -0.04em;
   color: var(--ink);
   text-decoration: none;
   flex-shrink: 0;
-  line-height: 0.95;
+  line-height: 1;
 }
 .brand-mark:hover { text-decoration: none; opacity: 0.7; }
 
@@ -818,7 +1011,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .jumps a:hover { color: var(--ink); text-decoration: none; }
 .jumps a .n {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--muted);
 }
@@ -844,7 +1037,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   padding: 8px 0;
   background: var(--paper);
   border: 1px solid var(--line);
-  box-shadow: 0 10px 28px rgba(20,20,20,0.08);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -864,16 +1057,6 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   text-decoration: none;
 }
 
-.work-path {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.66rem;
-  color: var(--muted);
-  word-break: break-all;
-  margin: 0;
-  letter-spacing: 0.01em;
-  max-width: 36em;
-}
-
 .page-head {
   display: flex;
   flex-wrap: wrap;
@@ -883,12 +1066,12 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   margin-bottom: 22px;
 }
 .page-title {
-  font-family: "Instrument Serif", serif;
-  font-weight: 400;
-  font-size: clamp(1.85rem, 3.5vw, 2.55rem);
-  letter-spacing: -0.025em;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: clamp(1.55rem, 2.8vw, 2rem);
+  letter-spacing: -0.045em;
   margin: 0;
-  line-height: 1.05;
+  line-height: 1.1;
   color: var(--ink);
 }
 .page-lede {
@@ -898,7 +1081,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   max-width: 36em;
 }
 .page-meta {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--muted);
   letter-spacing: 0.02em;
@@ -918,16 +1101,17 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   align-items: center;
   gap: 8px;
   margin-bottom: 18px;
-  padding: 10px 12px;
-  background: var(--mist);
+  padding: 10px 0 12px;
+  background: var(--paper);
   border: none;
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 .toolbar .count {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--muted);
   margin-right: auto;
@@ -951,35 +1135,37 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 body.select-mode .toolbar-organize { display: flex; }
 #selectModeBtn.on {
-  background: var(--ink);
-  color: #fff;
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
 }
 .chip {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-weight: 500;
   font-size: 0.78rem;
-  padding: 5px 12px;
+  padding: 5px 10px 7px;
   border: none;
   border-radius: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--muted);
   cursor: pointer;
-  transition: background .12s, color .12s;
+  transition: color .12s, box-shadow .12s;
+  box-shadow: inset 0 -2px 0 transparent;
 }
-.chip:hover { background: var(--paper); }
+.chip:hover { color: var(--ink); background: transparent; }
 .chip.on {
-  background: var(--ink);
-  color: #fff;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
 }
-.chip.on .n { color: rgba(255,255,255,0.75); }
+.chip.on .n { color: var(--muted); }
 .chip .n {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.68rem;
   color: var(--muted);
   margin-left: 4px;
 }
 .btn-reclass {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-weight: 500;
   font-size: 0.78rem;
   padding: 5px 12px;
@@ -993,7 +1179,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .btn-reclass:hover { background: var(--paper); }
 .btn-reclass:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-trash {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-weight: 500;
   font-size: 0.78rem;
   padding: 5px 12px;
@@ -1007,7 +1193,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .btn-trash:hover { background: var(--hazard); color: #fff; }
 .btn-trash:disabled { opacity: 0.4; cursor: not-allowed; }
 .sel-count {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--ink);
   min-width: 4.5em;
@@ -1030,8 +1216,14 @@ body.select-mode .toolbar-organize { display: flex; }
   transition: background .12s;
 }
 .ledger-row:hover {
-  background: rgba(240, 239, 236, 0.55);
+  background: var(--mist);
   text-decoration: none;
+}
+.ledger-row.is-empty {
+  opacity: 0.55;
+}
+.ledger-row.is-empty:hover {
+  opacity: 0.85;
 }
 .ledger-row:hover .ledger-key { font-weight: 400; letter-spacing: -0.03em; }
 .ledger-row > a.ledger-key {
@@ -1039,19 +1231,19 @@ body.select-mode .toolbar-organize { display: flex; }
   color: inherit;
 }
 .ledger-key {
-  font-family: "Instrument Serif", serif;
-  font-weight: 400;
-  font-size: 1.55rem;
-  letter-spacing: -0.025em;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 1.15rem;
+  letter-spacing: -0.035em;
   color: var(--ink);
   transition: letter-spacing .12s ease;
 }
 .ledger-sub { font-size: 0.9rem; color: var(--muted); }
 .ledger-sub .theme { color: var(--ink); font-weight: 500; }
 .ledger-stats {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
-  color: #55534E;
+  color: #444444;
   text-align: right;
   white-space: nowrap;
   letter-spacing: 0.02em;
@@ -1063,7 +1255,7 @@ body.select-mode .toolbar-organize { display: flex; }
   justify-self: end;
 }
 .ledger-sync {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-size: 0.72rem;
   color: var(--muted);
   background: transparent;
@@ -1072,13 +1264,15 @@ body.select-mode .toolbar-organize { display: flex; }
   padding: 4px 8px;
   cursor: pointer;
   line-height: 1.2;
-  opacity: 0;
+  opacity: 0.85;
+  border-color: var(--line);
   transition: opacity .12s ease, color .12s ease, border-color .12s ease;
 }
 .ledger-row:hover .ledger-sync,
 .ledger-sync:focus-visible {
   opacity: 1;
-  border-color: var(--line);
+  border-color: #c8c5be;
+  color: var(--ink);
 }
 .ledger-sync:hover,
 .ledger-sync:focus-visible {
@@ -1088,10 +1282,28 @@ body.select-mode .toolbar-organize { display: flex; }
 @media (hover: none) {
   .ledger-sync { opacity: 0.85; border-color: var(--line); }
 }
+.ledger-key-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ledger-previews {
+  display: inline-flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.ledger-previews img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  background: var(--mist);
+  display: block;
+}
 .ledger-go {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-size: 1.15rem;
-  color: #55534E;
+  color: var(--muted);
   opacity: 0.75;
   line-height: 1;
   transition: color .12s ease, transform .12s ease, opacity .12s ease;
@@ -1109,7 +1321,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .sheet {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px 12px;
+  gap: 16px 16px;
 }
 .cell {
   position: relative;
@@ -1126,7 +1338,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .cell.hidden { display: none; }
 .cell.starred .thumb,
 .cell.starred .thumb-miss {
-  outline: 1px solid rgba(154,107,31,0.85);
+  outline: 1px solid var(--ink);
   outline-offset: 0;
 }
 .cell.selected .thumb,
@@ -1167,7 +1379,7 @@ body.select-mode .star.on { opacity: 1; }
   aspect-ratio: 1;
   background: var(--mist);
   color: var(--muted);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   text-decoration: none;
 }
@@ -1181,27 +1393,34 @@ body.select-mode .star.on { opacity: 1; }
   border-top: none;
 }
 .cell .idx {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.62rem;
   color: var(--muted);
   flex-shrink: 0;
   letter-spacing: 0.04em;
 }
 .cell .fname {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-size: 0.72rem;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.cell:hover .fname,
+.cell:focus-within .fname,
+body.select-mode .cell .fname {
+  opacity: 1;
 }
 .cell .badge {
   position: absolute;
   left: 10px;
   top: auto;
   bottom: 36px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.58rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1230,14 +1449,14 @@ body.select-mode .star.on { opacity: 1; }
   padding: 0;
   transition: color .12s, background .12s, opacity .12s, transform .12s;
   z-index: 2;
-  opacity: 0.72;
+  opacity: 0.55;
 }
 .cell:hover .star,
 .star.on,
 .star:focus-visible { opacity: 1; }
 .star:hover { color: #fff; background: rgba(20,20,20,0.35); }
 .star.on {
-  background: var(--warn);
+  background: var(--ink);
   color: #fff;
   text-shadow: none;
   opacity: 1;
@@ -1251,19 +1470,27 @@ body.select-mode .star.on { opacity: 1; }
 }
 
 .lb {
-  display: none;
+  display: flex;
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(20,20,20,0.94);
+  background: #0a0a0a;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.35s ease, visibility 0.35s ease;
 }
-.lb.open { display: flex; }
+.lb.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 .lb img, .lb video {
-  max-width: min(96vw, 1200px);
-  max-height: 86vh;
+  max-width: 100vw;
+  max-height: 100vh;
   object-fit: contain;
 }
 .lb-bar {
@@ -1274,10 +1501,10 @@ body.select-mode .star.on { opacity: 1; }
   display: flex;
   gap: 8px;
   align-items: center;
-  background: var(--paper);
+  background: rgba(255,255,255,0.92);
   border: none;
   padding: 10px 14px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--ink);
   max-width: 90vw;
@@ -1286,11 +1513,18 @@ body.select-mode .star.on { opacity: 1; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 48vw;
+  max-width: 42vw;
+}
+.lb-bar .pos {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
 }
 .lb-bar button,
 .lb-bar a {
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--sans);
   font-weight: 500;
   font-size: 0.78rem;
   padding: 4px 10px;
@@ -1303,7 +1537,7 @@ body.select-mode .star.on { opacity: 1; }
 .lb-bar button:hover,
 .lb-bar a:hover { background: var(--mist); }
 .lb-bar .star-lb { opacity: 1; color: var(--muted); text-shadow: none; position: static; width: auto; height: auto; }
-.lb-bar .star-lb.on { background: var(--warn); color: #fff; }
+.lb-bar .star-lb.on { background: var(--ink); color: #fff; }
 
 .toast {
   position: fixed;
@@ -1326,7 +1560,7 @@ body.select-mode .star.on { opacity: 1; }
   padding: 18px;
   background: var(--mist);
   border: none;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -1376,7 +1610,7 @@ body.select-mode .star.on { opacity: 1; }
   border: 1px solid var(--line);
   background: var(--mist);
   color: var(--ink);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   line-height: 1.45;
   resize: vertical;
@@ -1432,7 +1666,7 @@ body.select-mode .star.on { opacity: 1; }
 }
 
 .page-in {
-  animation: pageIn 0.36s ease both;
+  animation: pageIn 0.45s ease both;
 }
 @keyframes pageIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -1452,7 +1686,7 @@ body.select-mode .star.on { opacity: 1; }
   .ledger-sub { grid-column: 1 / -1; }
   .ledger-stats { text-align: left; white-space: normal; }
   .ledger-go { grid-row: 1; grid-column: 2; }
-  .sheet { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px 10px; }
+  .sheet { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px 14px; }
   .star { opacity: 0.92; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1757,6 +1991,7 @@ PAGE_JS = '''
       lb = document.createElement('div');
       lb.className = 'lb';
       lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
+        '<span class="pos"></span>' +
         '<span class="nm"></span>' +
         '<button type="button" class="star star-lb" title="加星">☆</button>' +
         '<a class="open-raw" href="#" target="_blank" rel="noopener">原图</a>' +
@@ -1778,6 +2013,18 @@ PAGE_JS = '''
       media.appendChild(img);
     }
     lb.querySelector('.nm').textContent = name;
+    var items = visibleLightboxThumbs();
+    var pos = 0;
+    for (var i = 0; i < items.length; i++) {
+      if ((items[i].getAttribute('data-path') || '') === path) {
+        pos = i;
+        break;
+      }
+    }
+    var posEl = lb.querySelector('.pos');
+    if (posEl) {
+      posEl.textContent = items.length ? ((pos + 1) + ' / ' + items.length) : '';
+    }
     var raw = lb.querySelector('.open-raw');
     raw.href = src;
     var starBtn = lb.querySelector('.star-lb');
@@ -1800,9 +2047,16 @@ PAGE_JS = '''
 '''
 
 
-def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) -> bytes:
-    """Wrap page body in shared topbar / assets."""
-    crumbs = crumbs or [('首页', '/')]
+def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
+               buckets: dict = None, star_n: int = None) -> bytes:
+    """Wrap page body in shared topbar / assets.
+
+    When callers already have scan/star results (e.g. render_home), pass
+    ``buckets`` / ``star_n`` to avoid a second walk. Otherwise uses the short
+    TTL topbar cache (see get_topbar_stats).
+    """
+    if crumbs is None:
+        crumbs = [('首页', '/')]
     crumb_parts = []
     for i, (label, href) in enumerate(crumbs):
         if i:
@@ -1813,14 +2067,21 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
             crumb_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
 
     # Counts for top jumps (avoid repeating a footer link dump on home)
-    star_n = shots_n = records_n = docs_n = things_n = 0
+    shots_n = records_n = docs_n = things_n = 0
     if work is not None:
-        star_n = len(list_all_starred(work))
-        buckets = scan_buckets(work)
+        if buckets is None or star_n is None:
+            cached_star, cached_buckets = get_topbar_stats(work)
+            if star_n is None:
+                star_n = cached_star
+            if buckets is None:
+                buckets = cached_buckets
+        star_n = int(star_n or 0)
         shots_n = int(buckets.get('screenshots_count') or 0)
         records_n = int(buckets.get('screenrecords_count') or 0)
         docs_n = int(buckets.get('docs_count') or 0)
         things_n = int(buckets.get('things_count') or 0)
+    else:
+        star_n = int(star_n or 0)
 
     def _jump(href: str, label: str, n: int = None) -> str:
         if n is None:
@@ -1846,25 +2107,53 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
         '</details>',
     ]
 
-    work_html = ''
-    if work is not None:
-        work_html = f'<div class="work-path">{_esc(work)}</div>'
+    crumbs_html = ''
+    if crumb_parts:
+        crumbs_html = (
+            f'<nav class="crumbs" aria-label="面包屑">{"".join(crumb_parts)}</nav>'
+        )
 
-    console_js = '''
-(function () {
+    # Server-known dashboard address (never claim browse origin is the console).
+    dash_fallback_js = json.dumps(dashboard_file_url(), ensure_ascii=False)
+    console_js = f'''
+(function () {{
   var a = document.getElementById('consoleLink');
   if (!a) return;
-  var url = null;
-  try { url = localStorage.getItem('picvault.dashboard.url'); } catch (e) {}
-  if (url) {
-    a.href = url;
-  } else {
-    a.addEventListener('click', function (e) {
+  var dash = null;
+  try {{ dash = localStorage.getItem('picvault.dashboard.url'); }} catch (e) {{}}
+  var fallbackDash = {dash_fallback_js};
+  function showConsoleHint() {{
+    var url = (dash && String(dash).trim()) || fallbackDash || '';
+    var tip = '请打开控制台（outputs/dashboard.html）。从控制台点「打开浏览」进入本页后即可记住返回路径。';
+    if (!url) {{
+      alert(tip);
+      return;
+    }}
+    var done = function (copied) {{
+      var msg = tip + '\\n\\n控制台地址：\\n' + url;
+      if (copied) msg += '\\n\\n（已复制到剪贴板）';
+      // prompt 内输入框可选中，便于手动复制；clipboard 成功时再带提示。
+      if (window.prompt) {{
+        window.prompt(msg + (copied ? '' : '\\n\\n可全选下方地址复制：'), url);
+      }} else {{
+        alert(msg);
+      }}
+    }};
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(url).then(function () {{ done(true); }}, function () {{ done(false); }});
+    }} else {{
+      done(false);
+    }}
+  }}
+  if (dash) {{
+    a.href = dash;
+  }} else {{
+    a.addEventListener('click', function (e) {{
       e.preventDefault();
-      alert('请从控制台点「打开浏览」进入本页，或手动打开 outputs/dashboard.html');
-    });
-  }
-})();
+      showConsoleHint();
+    }});
+  }}
+}})();
 '''
 
     doc = f'''<!DOCTYPE html>
@@ -1873,9 +2162,8 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)} — PicVault</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/500.css">
 <style>{PAGE_CSS}</style>
 </head>
 <body>
@@ -1883,8 +2171,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
   <header class="topbar">
     <a class="brand-mark" href="/">PicVault</a>
     <div class="topbar-center">
-      <nav class="crumbs" aria-label="面包屑">{''.join(crumb_parts)}</nav>
-      {work_html}
+      {crumbs_html}
     </div>
     <nav class="jumps" aria-label="快捷入口">{''.join(jump_parts)}</nav>
   </header>
@@ -1897,6 +2184,16 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None) ->
 </body>
 </html>'''
     return doc.encode('utf-8')
+
+
+def html_error_page(title: str, message: str) -> bytes:
+    """Minimal White Cube error page (not plain text)."""
+    body = (
+        f'<div class="page-head"><h2 class="page-title">{_esc(title)}</h2></div>'
+        f'<div class="ledger"><div class="ledger-empty">{_esc(message)} '
+        f'<a href="/">回归档</a></div></div>'
+    )
+    return page_shell(title, body, work=None, crumbs=[('首页', '/'), (title, '#')])
 
 
 def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
@@ -1992,7 +2289,8 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal') 
 
 
 def render_home(work: Path) -> bytes:
-    buckets = scan_buckets(work)
+    # One cached scan for ledger + topbar (page_shell reuses buckets/star_n).
+    star_n, buckets = get_topbar_stats(work)
     years = sorted(buckets['years'].keys(), reverse=True)
     rows = []
     for year in years:
@@ -2001,15 +2299,25 @@ def render_home(work: Path) -> bytes:
         total_videos = sum(m['videos'] for m in months)
         total_stars = sum(m.get('stars', 0) for m in months)
         total_lives = sum(m.get('lives', 0) for m in months)
-        themed = sum(1 for m in months if m.get('is_themed'))
+        n_default = sum(1 for m in months if not m.get('is_themed'))
+        n_themed = sum(1 for m in months if m.get('is_themed'))
+        if n_default and n_themed:
+            sub = f'{n_default} 个月 · {n_themed} 个主题'
+        elif n_themed:
+            sub = f'{n_themed} 个主题'
+        elif n_default:
+            sub = f'{n_default} 个月'
+        else:
+            sub = '空'
         stats = format_ledger_stats(
             total_photos, total_videos, total_stars, total_lives
         )
+        previews = ledger_previews_html(peek_year_previews(work, year, months, limit=3))
         rows.append(
             f'<a class="ledger-row" href="/y/{_esc(year)}">'
-            f'<span class="ledger-key">{_esc(year)}</span>'
-            f'<span class="ledger-sub">{len(months)} 个月'
-            f'{" · " + str(themed) + " 个主题" if themed else ""}</span>'
+            f'<span class="ledger-key-wrap">'
+            f'<span class="ledger-key">{_esc(year)}</span>{previews}</span>'
+            f'<span class="ledger-sub">{sub}</span>'
             f'<span class="ledger-stats">{stats}</span>'
             f'<span class="ledger-go" aria-hidden="true">›</span>'
             f'</a>'
@@ -2017,7 +2325,7 @@ def render_home(work: Path) -> bytes:
     if not rows:
         ledger = (
             '<div class="ledger"><div class="ledger-empty">'
-            '还没有归档。把照片放进 inbox/ 后跑流水线。'
+            '还没有归档。把照片放进收件箱后，到控制台跑流水线。'
             '</div></div>'
         )
     else:
@@ -2027,13 +2335,13 @@ def render_home(work: Path) -> bytes:
         f'<div class="page-head">'
         f'<div>'
         f'<h2 class="page-title">归档</h2>'
-        f'<p class="page-lede">按年份翻看 by-date，点开加星。</p>'
         f'</div>'
         f'</div>'
-        f'<p class="section-label">年份</p>'
         f'{ledger}'
     )
-    return page_shell('归档', body, work=work, crumbs=[('首页', '/')])
+    return page_shell(
+        '归档', body, work=work, crumbs=[], buckets=buckets, star_n=star_n,
+    )
 
 
 def render_year(work: Path, year: str) -> bytes:
@@ -2046,36 +2354,53 @@ def render_year(work: Path, year: str) -> bytes:
         return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
 
     months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
-    rows = []
+    filled_rows = []
+    empty_rows = []
     for m in months:
         photo_count, video_count, live_count = count_month_media(m)
         star_count = len(load_stars(work, m.name))
         is_themed = '_' in m.name
-        theme = m.name.split('_', 1)[1] if is_themed else ''
-        sub = (
-            f'<span class="theme">{_esc(theme)}</span>'
-            if theme else '默认桶'
-        )
+        display = bucket_display_name(m.name)
+        month_key = bucket_month_key(m.name)
+        if is_themed:
+            sub = month_key
+            key = display
+        else:
+            sub = ''
+            key = month_key
         href = f'/y/{year}/{urllib.parse.quote(m.name)}'
         stats = format_ledger_stats(
             photo_count, video_count, star_count, live_count
         )
-        rows.append(
-            f'<a class="ledger-row" href="{_esc(href)}">'
-            f'<span class="ledger-key">{_esc(m.name)}</span>'
-            f'<span class="ledger-sub">{sub}</span>'
+        empty = photo_count == 0 and video_count == 0
+        row_cls = 'ledger-row is-empty' if empty else 'ledger-row'
+        sub_html = f'<span class="ledger-sub">{_esc(sub)}</span>' if sub else '<span class="ledger-sub"></span>'
+        previews = ''
+        if not empty:
+            previews = ledger_previews_html(
+                peek_bucket_previews(work, year, m.name, limit=3)
+            )
+        row = (
+            f'<a class="{row_cls}" href="{_esc(href)}">'
+            f'<span class="ledger-key-wrap">'
+            f'<span class="ledger-key">{_esc(key)}</span>{previews}</span>'
+            f'{sub_html}'
             f'<span class="ledger-stats">{stats}</span>'
             f'<span class="ledger-go" aria-hidden="true">›</span>'
             f'</a>'
         )
+        if empty:
+            empty_rows.append(row)
+        else:
+            filled_rows.append(row)
 
+    rows = filled_rows + empty_rows
     ledger_inner = ''.join(rows) if rows else '<div class="ledger-empty">空年份</div>'
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">{_esc(year)}</h2>'
-        f'<p class="page-meta">{len(months)} 个桶</p>'
+        f'<p class="page-meta">{len(months)} 个入口</p>'
         f'</div>'
-        f'<p class="section-label">月份</p>'
         f'<div class="ledger">{ledger_inner}</div>'
     )
     return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
@@ -2126,6 +2451,7 @@ def theme_for_bucket(work: Path, bucket: str):
 def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     bucket_name = month
     is_themed = '_' in month
+    display = bucket_display_name(month)
     gallery_ctx = 'theme' if is_themed else 'normal'
     files = list_bucket(work, year, month)
     stars = load_stars(work, bucket_name)
@@ -2147,20 +2473,20 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
                 meta = f'周期 {period}'
     body = (
         f'<div class="page-head">'
-        f'<h2 class="page-title">{_esc(month)}</h2>'
+        f'<h2 class="page-title">{_esc(display)}</h2>'
         f'<p class="page-meta">{_esc(meta)}</p>'
         f'</div>'
         f'{_gallery_toolbar(len(files), len(stars), context=gallery_ctx)}'
         f'{sheet}'
     )
     return page_shell(
-        f'{year}/{month}',
+        f'{year}/{display}',
         body,
         work=work,
         crumbs=[
             ('首页', '/'),
             (year, f'/y/{year}'),
-            (month, f'/y/{year}/{urllib.parse.quote(month)}'),
+            (display, f'/y/{year}/{urllib.parse.quote(month)}'),
         ],
     )
 
@@ -2181,7 +2507,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
-        f'<p class="page-meta">screenshots/</p>'
+        f'<p class="page-meta">手机截图</p>'
         f'</div>'
         f'{_gallery_toolbar(len(files), len(stars), context="screen")}'
         f'{sheet}'
@@ -2210,7 +2536,7 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">录屏</h2>'
-        f'<p class="page-meta">screenrecords/</p>'
+        f'<p class="page-meta">屏幕录制</p>'
         f'</div>'
         f'{_gallery_toolbar(len(files), len(stars), context="screen")}'
         f'{sheet}'
@@ -2239,7 +2565,7 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">文档</h2>'
-        f'<p class="page-meta">docs/ · 手机拍的证件/票据等，手动移入</p>'
+        f'<p class="page-meta">证件、票据等，手动移入</p>'
         f'</div>'
         f'{_gallery_toolbar(len(files), len(stars), context="docs")}'
         f'{sheet}'
@@ -2268,7 +2594,7 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">物品</h2>'
-        f'<p class="page-meta">things/ · 物品照片/视频，手动移入</p>'
+        f'<p class="page-meta">物品照片与视频，手动移入</p>'
         f'</div>'
         f'{_gallery_toolbar(len(files), len(stars), context="things")}'
         f'{sheet}'
@@ -2298,7 +2624,7 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">加星</h2>'
-        f'<p class="page-meta">汇总所有桶的 ★ · {len(items)} 个</p>'
+        f'<p class="page-meta">{len(items)} 张已加星</p>'
         f'</div>'
         f'{_gallery_toolbar(len(items), len(items), context="starred")}'
         f'{sheet}'
@@ -2421,6 +2747,8 @@ def is_work_initialized(work: Path) -> bool:
 class Handler(BaseHTTPRequestHandler):
     work: Path = None
     thumb_root: Path = None
+    bind_host: str = '127.0.0.1'
+    bind_port: int = 8765
 
     def log_message(self, fmt, *args):
         pass  # quiet
@@ -2626,30 +2954,55 @@ class Handler(BaseHTTPRequestHandler):
                 body = render_starred(self.work, self.thumb_root)
                 self._send(body, 'text/html')
             elif path == '/api/status':
-                # JSON status endpoint for dashboard polling
+                # JSON status endpoint for dashboard polling.
+                # File counts use get_status_counts (short TTL) so pollStatus
+                # every 5s does not full-walk the vault on every request.
                 try:
                     code_mtime = datetime.fromtimestamp(
                         Path(__file__).stat().st_mtime
                     ).isoformat(timespec='seconds')
                 except OSError:
                     code_mtime = None
-                self._send_json({
+                bind_host = self.bind_host or '127.0.0.1'
+                bind_port = int(self.bind_port or 8765)
+                lan_hint = None
+                if bind_host in ('127.0.0.1', 'localhost', '::1'):
+                    browse_url = f'http://127.0.0.1:{bind_port}/'
+                elif bind_host in ('0.0.0.0', '::', '[::]'):
+                    # Wildcard bind: loopback always works; LAN via this host's name.
+                    hn = socket.gethostname()
+                    if not hn.endswith('.local'):
+                        hn = hn + '.local'
+                    browse_url = f'http://127.0.0.1:{bind_port}/'
+                    lan_hint = f'http://{hn}:{bind_port}/'
+                else:
+                    browse_url = f'http://{bind_host}:{bind_port}/'
+                counts = get_status_counts(self.work)
+                status = {
                     'running': True,
                     'work': str(self.work),
                     'initialized': is_work_initialized(self.work),
                     'code_mtime': code_mtime,
-                    'inbox': count_files_in(self.work / 'inbox'),
-                    'by_date': count_files_in(self.work / 'by-date'),
-                    'screenshots': count_files_in(self.work / 'screenshots'),
-                    'screenrecords': count_files_in(self.work / 'screenrecords'),
-                    'docs': count_files_in(self.work / 'docs'),
-                    'things': count_files_in(self.work / 'things'),
-                    'vlogs': count_files_in(self.work / '_vlogs'),
-                    'trash': count_files_in(self.work / '_trash'),
-                    'starred': count_starred(self.work),
+                    'host': bind_host,
+                    'port': bind_port,
+                    'url': browse_url,
+                    'dashboard_path': dashboard_file_path(),
+                    'dashboard_url': dashboard_file_url(),
+                    'inbox': counts['inbox'],
+                    'by_date': counts['by_date'],
+                    'screenshots': counts['screenshots'],
+                    'screenrecords': counts['screenrecords'],
+                    'docs': counts['docs'],
+                    'things': counts['things'],
+                    'vlogs': counts['vlogs'],
+                    'trash': counts['trash'],
+                    'starred': counts['starred'],
                     'last_sync': last_sync_time(self.work),
                     'pipeline': pipeline_step_markers(self.work),
-                })
+                }
+                if lan_hint:
+                    status['lan_hint'] = lan_hint
+                self._send_json(status)
             elif path == '/api/runs/active':
                 with _RUN_LOCK:
                     active = dict(_ACTIVE_RUN) if _ACTIVE_RUN else None
@@ -2680,12 +3033,12 @@ class Handler(BaseHTTPRequestHandler):
                 year = parts[2]
                 month = urllib.parse.unquote(parts[3])
                 if not is_safe_month_segment(month):
-                    self._send(b'bad month', 'text/plain', 400)
+                    self._send(html_error_page('无效路径', '月份名称不合法。'), 'text/html', 400)
                     return
                 year_dir = (self.work / 'by-date' / year).resolve()
                 month_dir = (self.work / 'by-date' / year / month).resolve()
                 if not path_is_under(month_dir, year_dir):
-                    self._send(b'forbidden', 'text/plain', 403)
+                    self._send(html_error_page('无法打开', '路径不允许访问。'), 'text/html', 403)
                     return
                 body = render_bucket(self.work, year, month, self.thumb_root)
                 self._send(body, 'text/html')
@@ -2698,9 +3051,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/api/star':
                 self._handle_star_api(qs)
             else:
-                self._send(b'404 Not Found', 'text/plain', 404)
+                self._send(html_error_page('未找到', '没有这个页面。'), 'text/html', 404)
         except Exception as e:
-            self._send(f'ERROR: {e}'.encode(), 'text/plain', 500)
+            self._send(html_error_page('出错了', str(e)), 'text/html', 500)
 
     def _send(self, body: bytes, content_type='text/html', status=200):
         self.send_response(status)
@@ -3286,13 +3639,36 @@ class Handler(BaseHTTPRequestHandler):
         thumb_root_res = self.thumb_root.resolve()
         if not path_is_under(thumb_res, thumb_root_res):
             self._send(b'forbidden', 'text/plain', 403); return
-        # Serve JPEG bytes directly (already fenced under thumb_root).
+        try:
+            st = thumb_res.stat()
+        except OSError:
+            self._send(b'no thumb', 'text/plain', 404); return
+        # ETag from thumb mtime+size so browsers can revalidate without re-download.
+        etag = f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
+        cache_ctrl = 'private, max-age=86400'
+        inm = self.headers.get('If-None-Match')
+        if inm and etag in {t.strip() for t in inm.split(',')}:
+            self.send_response(304)
+            self.send_header('ETag', etag)
+            self.send_header('Cache-Control', cache_ctrl)
+            self.send_header(
+                'Last-Modified',
+                email.utils.formatdate(st.st_mtime, usegmt=True),
+            )
+            self.end_headers()
+            return
         try:
             data = thumb_res.read_bytes()
         except OSError:
             self._send(b'no thumb', 'text/plain', 404); return
         self.send_response(200)
         self.send_header('Content-Type', 'image/jpeg')
+        self.send_header('Cache-Control', cache_ctrl)
+        self.send_header('ETag', etag)
+        self.send_header(
+            'Last-Modified',
+            email.utils.formatdate(st.st_mtime, usegmt=True),
+        )
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -3531,6 +3907,8 @@ def main():
 
     Handler.work = work
     Handler.thumb_root = thumb_root
+    Handler.bind_host = args.host
+    Handler.bind_port = args.port
 
     # Build argv factories: each takes a sandbox-validated backup path.
     w = str(work)

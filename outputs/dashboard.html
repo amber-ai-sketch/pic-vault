@@ -7,22 +7,22 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>PicVault — 盘点</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/500.css">
 <style>
   :root {
-    --paper: #FAFAF8;
-    --mist: #F0EFEC;
-    --ink: #141414;
-    --muted: #7A7872;
-    --line: #E4E2DC;
-    --live: #2F6F4E;
-    --warn: #9A6B1F;
+    --paper: #FFFFFF;
+    --mist: #F4F4F4;
+    --ink: #111111;
+    --muted: #6B6B6B;
+    --line: #E6E6E6;
+    --live: #1F7A4D;
+    --warn: #8A6A1F;
     --hazard: #9B2C2C;
-    /* aliases used by existing rules */
     --bg: var(--paper);
     --soft: var(--mist);
+    --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   }
 
   * { box-sizing: border-box; }
@@ -30,7 +30,7 @@
 
   body {
     margin: 0;
-    font-family: "IBM Plex Sans", sans-serif;
+    font-family: var(--sans);
     color: var(--ink);
     line-height: 1.5;
     background: var(--paper);
@@ -57,13 +57,13 @@
   }
 
   .brand {
-    font-family: "Instrument Serif", serif;
-    font-weight: 400;
-    font-size: clamp(1.85rem, 4vw, 2.4rem);
-    line-height: 0.95;
-    letter-spacing: -0.02em;
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: clamp(1.45rem, 3vw, 1.85rem);
+    line-height: 1;
+    letter-spacing: -0.045em;
     margin: 0;
-    font-style: italic;
+    font-style: normal;
   }
 
   .tagline {
@@ -86,7 +86,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.72rem;
     letter-spacing: 0.02em;
   }
@@ -159,13 +159,13 @@
     text-transform: uppercase;
   }
   .path-chip .v {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.74rem;
     word-break: break-all;
   }
   .paths-root-hint {
     margin: 0;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.66rem;
     color: var(--muted);
     word-break: break-all;
@@ -182,7 +182,7 @@
   .path-line:last-child { border-bottom: none; }
   .path-line .k { font-size: 0.78rem; color: var(--muted); }
   .path-line .v {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
     word-break: break-all;
   }
@@ -209,13 +209,13 @@
   }
   .path-field .hint.warn { color: var(--warn); margin-top: 6px; }
   .path-field .hint code {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.74rem;
   }
   .path-field input,
   .path-field .path-auto {
     width: 100%;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.8rem;
     padding: 11px 12px;
     border: none;
@@ -265,7 +265,7 @@
     text-overflow: ellipsis;
   }
   .metric .v {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 1.25rem;
     font-weight: 500;
     letter-spacing: -0.04em;
@@ -285,10 +285,21 @@
   .metric.wide .v { font-size: 0.88rem; word-break: break-all; letter-spacing: -0.02em; }
   .metric.wide .v.is-empty { font-size: 0.88rem; }
 
+  body:not(.web-live) .library-section {
+    display: none;
+  }
   body:not(.web-live) .library-list {
     opacity: 0.42;
     pointer-events: none;
   }
+  #startWebFeedback {
+    margin: 10px 0 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  #startWebFeedback.ok { color: var(--live); }
+  #startWebFeedback.err { color: var(--hazard); }
+
 
   .alert {
     display: none;
@@ -316,7 +327,7 @@
     display: block;
     background: var(--mist);
     padding: 11px 12px;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.72rem;
     overflow-x: auto;
     white-space: pre;
@@ -400,7 +411,7 @@
     border-radius: 0;
     cursor: pointer;
     font-size: 0.8rem;
-    font-family: "IBM Plex Sans", sans-serif;
+    font-family: var(--sans);
     font-weight: 500;
     letter-spacing: 0.01em;
     transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -452,7 +463,7 @@
   .pipeline-progress {
     margin: 8px 0 0;
     color: var(--muted);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.7rem;
     letter-spacing: 0.02em;
   }
@@ -481,7 +492,7 @@
     flex-wrap: wrap;
   }
   .step-num {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.7rem;
     font-weight: 500;
     color: var(--muted);
@@ -507,7 +518,7 @@
     color: var(--muted);
     font-size: 0.7rem;
     font-weight: 500;
-    font-family: "IBM Plex Sans", sans-serif;
+    font-family: var(--sans);
     line-height: 1;
     cursor: help;
     flex-shrink: 0;
@@ -577,7 +588,7 @@
     max-width: 48em;
   }
   .step-desc code {
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
     color: var(--ink);
     background: var(--mist);
@@ -593,6 +604,9 @@
   .step-status.need { color: var(--warn); }
 
   /* Web 未运行：00、02–06 操作按钮不可点（复制命令仍可用） */
+  body.web-live #startWebBtn { display: none; }
+  body.web-live #webStartRunBtn { display: none; }
+  body:not(.web-live) #openWebBtnStep { display: none !important; }
   body:not(.web-live) #stepInit .btn-row button,
   body:not(.web-live) #stepDedupe .btn-row button,
   body:not(.web-live) #stepRename .btn-row button,
@@ -612,7 +626,7 @@
     border: none;
   }
   #outputPanel h2 {
-    font-family: "Instrument Serif", serif;
+    font-family: var(--sans);
     font-weight: 400;
     font-size: 1.35rem;
     margin: 0;
@@ -630,13 +644,13 @@
     font-size: 0.7rem;
     color: var(--muted);
     margin-bottom: 8px;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
   }
   #outputPanel pre {
     background: var(--mist);
     padding: 12px;
     border-radius: 0;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--mono);
     font-size: 0.72rem;
     overflow-x: auto;
     max-height: 400px;
@@ -691,7 +705,7 @@
   <header class="masthead">
     <div>
       <h1 class="brand">PicVault</h1>
-      <p class="tagline">从 inbox 到备份</p>
+      <p class="tagline">归档 · 加星 · 备份</p>
     </div>
     <div class="web-status">
       <div class="web-status-row">
@@ -704,50 +718,64 @@
     </div>
   </header>
 
+  <div class="alert page-in" id="webNotRunningCard">
+    <p class="alert-lead">请先启动 Web UI</p>
+    <p class="alert-sub">图库计数与运行按钮暂不可用；启动后约 5 秒内自动刷新。</p>
+    <div class="btn-row" style="margin-top:0">
+      <button type="button" id="startWebBtn" class="primary" onclick="startWebUi(this)">启动</button>
+      <button type="button" onclick="copyText('startCmd')">复制</button>
+    </div>
+    <details class="cmd-fold" style="margin-top:12px">
+      <summary>启动命令</summary>
+      <code class="cmd" id="startCmd"></code>
+    </details>
+    <p id="startWebFeedback" hidden></p>
+  </div>
+
   <section class="library-section page-in" aria-label="图库计数">
     <div class="library-list" role="group" aria-label="各桶计数">
       <div class="metric">
-        <span class="k">inbox</span>
+        <span class="k">收件箱</span>
         <span class="v is-empty" id="inbox"></span>
       </div>
       <div class="metric">
-        <span class="k">by-date</span>
+        <span class="k">按日期</span>
         <span class="v is-empty" id="byDate"></span>
       </div>
       <div class="metric">
-        <span class="k">screenshots</span>
+        <span class="k">截图</span>
         <span class="v is-empty" id="screenshots"></span>
       </div>
       <div class="metric">
-        <span class="k">screenrecords</span>
+        <span class="k">录屏</span>
         <span class="v is-empty" id="screenrecords"></span>
       </div>
       <div class="metric">
-        <span class="k">docs</span>
+        <span class="k">文档</span>
         <span class="v is-empty" id="docs"></span>
       </div>
       <div class="metric">
-        <span class="k">things</span>
+        <span class="k">物品</span>
         <span class="v is-empty" id="things"></span>
       </div>
       <div class="metric">
-        <span class="k">vlogs</span>
+        <span class="k">Vlog</span>
         <span class="v is-empty" id="vlogs"></span>
       </div>
       <div class="metric">
-        <span class="k">trash</span>
+        <span class="k">回收站</span>
         <span class="v is-empty" id="trash"></span>
       </div>
       <div class="metric">
-        <span class="k">starred</span>
+        <span class="k">加星</span>
         <span class="v is-empty" id="starred"></span>
       </div>
       <div class="metric wide">
-        <span class="k">last sync</span>
+        <span class="k">上次同步</span>
         <span class="v is-empty" id="lastSync"></span>
       </div>
     </div>
-    <p class="hint" id="libraryWorkHint" hidden style="margin:10px 0 0;font-size:0.78rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;word-break:break-all;"></p>
+    <p class="hint" id="libraryWorkHint" hidden style="margin:10px 0 0;font-size:0.78rem;color:var(--muted);font-family:var(--mono);word-break:break-all;"></p>
     <div class="alert warn" id="workMismatchCard">
       <p>Dashboard 的 WORK 与当前 Web 绑定的工作盘不一致。图库计数与流水线步骤状态（含 00 是否已初始化）都来自 Web 的旧路径，不能当作新盘状态。请先停旧进程，再用新 WORK 启动；启动后约 5 秒内自动刷新。</p>
       <code class="cmd" id="webRebindCmd"></code>
@@ -756,18 +784,6 @@
       </div>
     </div>
   </section>
-
-  <div class="alert page-in" id="webNotRunningCard">
-    <p class="alert-lead">请先启动 Web UI</p>
-    <p class="alert-sub">图库计数与运行按钮暂不可用；启动后约 5 秒内自动刷新。</p>
-    <div class="btn-row" style="margin-top:0">
-      <button type="button" onclick="copyText('startCmd')">复制启动命令</button>
-    </div>
-    <details class="cmd-fold" style="margin-top:12px">
-      <summary>启动命令</summary>
-      <code class="cmd" id="startCmd"></code>
-    </details>
-  </div>
 
   <div class="alert warn" id="notInitializedCard">
     <p>工作盘未初始化：缺少 by-date、_meta 等目录骨架。请先跑下方「00 初始化」；该步骤幂等，不会触碰 inbox 里已有文件。</p>
@@ -793,7 +809,7 @@
       <p class="paths-root-hint" id="sumProjectRoot"></p>
     </div>
 
-    <form class="paths-form visible" id="pathsForm" onsubmit="return savePaths(event)">
+    <form class="paths-form" id="pathsForm" onsubmit="return savePaths(event)">
       <div class="path-field">
         <label>PROJECT_ROOT</label>
         <p class="hint">自动识别（本文件上级目录）</p>
@@ -849,7 +865,7 @@
         </div>
         </details>
         <div class="btn-row">
-          <button id="initRunBtn" onclick="runInit(this)">运行 init</button>
+          <button id="initRunBtn" onclick="runInit(this)">运行初始化</button>
         </div>
       </div>
 
@@ -891,8 +907,8 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'dedupe_dry')">Dry-run</button>
-          <button class="danger" onclick="runApply(this, 'dedupe_apply', '确定执行去重？\n\n• 找出 inbox 里内容完全相同的文件\n• 相同内容的文件只留体积最大的一份\n• 其余移到 _trash/（可找回，不是永久删除）')">Apply</button>
+          <button onclick="runCommand(this, 'dedupe_dry')">预演</button>
+          <button class="danger" onclick="runApply(this, 'dedupe_apply', '确定执行去重？\n\n• 找出 inbox 里内容完全相同的文件\n• 相同内容的文件只留体积最大的一份\n• 其余移到 _trash/（可找回，不是永久删除）')">执行</button>
         </div>
       </div>
 
@@ -920,8 +936,8 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'rename_dry')">Dry-run</button>
-          <button class="danger" onclick="runApply(this, 'rename_apply', '确定整理归档？\n\n• 按拍摄时间重命名 inbox 里的文件\n• 照片/视频移入 by-date/，截图→screenshots/，录屏→screenrecords/\n• 会从 inbox 搬走文件（不是复制）\n• 不会自动同步主题；请到 /themes 按主题同步')">Apply</button>
+          <button onclick="runCommand(this, 'rename_dry')">预演</button>
+          <button class="danger" onclick="runApply(this, 'rename_apply', '确定整理归档？\n\n• 按拍摄时间重命名 inbox 里的文件\n• 照片/视频移入 by-date/，截图→screenshots/，录屏→screenrecords/\n• 会从 inbox 搬走文件（不是复制）\n• 不会自动同步主题；请到 /themes 按主题同步')">执行</button>
         </div>
       </div>
 
@@ -947,6 +963,7 @@
         </div>
         </details>
         <div class="btn-row">
+          <button type="button" id="webStartRunBtn" class="primary" onclick="startWebUi(this)">启动</button>
           <button class="danger" onclick="runCommand(this, 'web_stop')">停止</button>
           <button id="openWebBtnStep" class="primary" style="display:none" onclick="openWeb()">打开浏览</button>
         </div>
@@ -974,8 +991,8 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'sync_verify')">Dry-run</button>
-          <button class="danger" onclick="runApply(this, 'sync_apply', '确定同步到备份盘？\n\n• 建议已完成第 4 步：浏览核对、加星、纠错、回收站\n• 把工作盘的 by-date / screenshots / screenrecords / docs / things / 收藏 / vlog 镜像到备份盘\n• 默认只新增、不删除备份盘已有文件\n• 可能耗时较长，请保持两块盘都已挂载')">Apply</button>
+          <button onclick="runCommand(this, 'sync_verify')">预演</button>
+          <button class="danger" onclick="runApply(this, 'sync_apply', '确定同步到备份盘？\n\n• 建议已完成第 4 步：浏览核对、加星、纠错、回收站\n• 把工作盘的 by-date / screenshots / screenrecords / docs / things / 收藏 / vlog 镜像到备份盘\n• 默认只新增、不删除备份盘已有文件\n• 可能耗时较长，请保持两块盘都已挂载')">执行</button>
         </div>
       </div>
 
@@ -1945,6 +1962,7 @@ async function pollStatus() {
       if (openStep) openStep.style.display = 'inline-block';
       document.getElementById('webNotRunningCard').classList.remove('visible');
       document.body.classList.add('web-live');
+      setStartWebFeedback('', null);
 
       updateLibraryWorkHint(apiWork, mismatch);
       setWorkMismatch(mismatch, apiWork);
@@ -1967,6 +1985,7 @@ async function pollStatus() {
         if (progressEl) {
           progressEl.textContent = '进度：状态来自旧 WORK，不可信 — 请先按图库上方提示重启 Web';
         }
+        syncAlertPriority();
         return;
       }
 
@@ -1992,6 +2011,7 @@ async function pollStatus() {
         updateInitStatus('stale');
       }
       updatePipelineMarkers(d.pipeline);
+      syncAlertPriority();
     } else {
       throw new Error('bad status ' + r.status);
     }
@@ -2008,6 +2028,134 @@ async function pollStatus() {
     clearLibraryMetrics();
     updateInitStatus(null);
     updatePipelineMarkers(null);
+    syncAlertPriority();
+  }
+}
+
+
+const BOOT_PORT = 8764;
+const BOOT_URL = 'http://127.0.0.1:8764/api/web/start';
+const BOOT_HEALTH_URL = 'http://127.0.0.1:8764/api/health';
+
+function setStartWebFeedback(msg, cls) {
+  const el = document.getElementById('startWebFeedback');
+  if (!el) return;
+  if (!msg) {
+    el.hidden = true;
+    el.textContent = '';
+    el.className = '';
+    return;
+  }
+  el.hidden = false;
+  el.textContent = msg;
+  el.className = cls ? cls : '';
+}
+
+async function waitForWebLive(ms) {
+  const deadline = Date.now() + (ms || 15000);
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch(API_URL, { cache: 'no-store' });
+      if (r.ok) return true;
+    } catch (e) { /* retry */ }
+    await new Promise(function (res) { setTimeout(res, 500); });
+  }
+  return false;
+}
+
+async function startWebUi(btn) {
+  if (btn && btn.disabled) return;
+  if (!isConfigured(paths)) {
+    revealPathsForSetup();
+    alert('请先保存 WORK / BACKUP（PROJECT_ROOT 自动识别），再启动 Web UI。');
+    return;
+  }
+
+  const buttons = [
+    document.getElementById('startWebBtn'),
+    document.getElementById('webStartRunBtn'),
+  ].filter(Boolean);
+  const originals = buttons.map(function (b) { return b.textContent; });
+  buttons.forEach(function (b) {
+    b.disabled = true;
+    b.textContent = '启动中…';
+  });
+  setStartWebFeedback('正在通过本地 boot 助手启动…', null);
+
+  const bootCmd = 'WORK=' + shellSingleQuote(paths.work) + ' ' +
+    paths.projectRoot + '/picvault boot start';
+
+  try {
+    let healthOk = false;
+    try {
+      const h = await fetch(BOOT_HEALTH_URL, { cache: 'no-store' });
+      healthOk = h.ok;
+    } catch (e) {
+      healthOk = false;
+    }
+    if (!healthOk) {
+      setStartWebFeedback(
+        '启动助手未运行。请先在终端执行：' + bootCmd +
+        '（之后可一键启动；也可点「复制」粘贴 web start）',
+        'err'
+      );
+      return;
+    }
+
+    const r = await fetch(BOOT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ work: paths.work, port: WEB_PORT }),
+    });
+    let data = {};
+    try {
+      data = await r.json();
+    } catch (e) {
+      data = {};
+    }
+    if (!r.ok || !data.ok) {
+      setStartWebFeedback(
+        (data && data.error) || ('启动失败 (HTTP ' + r.status + ')'),
+        'err'
+      );
+      return;
+    }
+
+    setStartWebFeedback('已发出启动请求，等待 Web 就绪…', null);
+    const live = await waitForWebLive(15000);
+    if (live) {
+      setStartWebFeedback('Web UI 已启动', 'ok');
+      await pollStatus();
+    } else {
+      setStartWebFeedback(
+        '已请求启动，但尚未探测到 http://localhost:' + WEB_PORT +
+        '。可刷新或查看：tail "' + paths.work + '/_meta/logs/web.log"',
+        'err'
+      );
+    }
+  } catch (e) {
+    setStartWebFeedback('启动失败: ' + e.message, 'err');
+  } finally {
+    buttons.forEach(function (b, i) {
+      b.disabled = false;
+      b.textContent = originals[i];
+    });
+  }
+}
+
+function syncAlertPriority() {
+  const mismatch = document.getElementById('workMismatchCard');
+  const notRunning = document.getElementById('webNotRunningCard');
+  const notInit = document.getElementById('notInitializedCard');
+  const mOn = mismatch && mismatch.classList.contains('visible');
+  const rOn = notRunning && notRunning.classList.contains('visible');
+  const iOn = notInit && notInit.classList.contains('visible');
+  // Priority: mismatch > notRunning > notInit
+  if (mOn) {
+    if (notRunning) notRunning.classList.remove('visible');
+    if (notInit) notInit.classList.remove('visible');
+  } else if (rOn) {
+    if (notInit) notInit.classList.remove('visible');
   }
 }
 

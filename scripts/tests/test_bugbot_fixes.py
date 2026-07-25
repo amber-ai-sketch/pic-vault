@@ -62,14 +62,32 @@ def test_dashboard_pipeline_button():
 
 
 def test_dashboard_web_start_copy():
-    print('\n1b. Dashboard copy start command (no one-click boot)')
+    print('\n1b. Dashboard one-click start + copy command')
     text = DASHBOARD.read_text(encoding='utf-8')
     check('keeps copy start command', "copyText('startCmd')" in text)
-    check('no one-click start button', 'id="startWebBtn"' not in text)
-    check('no startWebUi', 'startWebUi' not in text)
-    check('no BOOT_URL', '8764/api/web/start' not in text)
-    check('no webStartRunBtn', 'id="webStartRunBtn"' not in text)
+    check('has startWebBtn', 'id="startWebBtn"' in text)
+    check('has startWebUi', 'async function startWebUi' in text)
+    check('has BOOT_URL', '8764/api/web/start' in text)
+    check('step 04 start uses startWebUi', 'id="webStartRunBtn"' in text and 'startWebUi(this)' in text)
     check('step 04 keeps open browse', 'id="openWebBtnStep"' in text)
+    check('boot helper script exists', (PROJECT_ROOT / 'scripts' / 'dashboard_boot.py').is_file())
+
+
+def test_console_link_shows_dashboard_url():
+    print('\n1c. Web UI 控制台 tip includes dashboard URL')
+    html = wb.page_shell('首页', '<p>x</p>', work=None).decode('utf-8')
+    dash_uri = wb.dashboard_file_url()
+    check('has 控制台 link', 'id="consoleLink">控制台</a>' in html)
+    check('embeds dashboard file URL', dash_uri in html)
+    check('labels 控制台地址', '控制台地址' in html)
+    check('no browse origin as console', "location.origin + '/'" not in html)
+    check('no 当前访问地址 browse label', '当前访问地址' not in html)
+    check('clipboard copy attempt', 'navigator.clipboard.writeText' in html)
+    check('prompt for selectable URL', 'window.prompt' in html)
+    check(
+        'no old alert-only copy',
+        "alert('请从控制台点「打开浏览」进入本页，或手动打开 outputs/dashboard.html')" not in html,
+    )
 
 
 def test_init_skeleton():
@@ -1861,10 +1879,152 @@ def test_web_path_traversal_and_cors_hardening():
             httpd.shutdown()
 
 
+def test_perf_quick_wins_cache_and_thumb_headers():
+    """Home/page_shell share one scan; /thumb Cache-Control; status counts TTL."""
+    print('\n27. Perf quick wins (topbar cache, thumb headers, status TTL)')
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    import threading
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        photo = work / 'by-date' / '2026' / '2026-07_海南' / 'photos'
+        photo.mkdir(parents=True)
+        sample = photo / '20260701_120000_iphone_aaa111.jpg'
+        # Minimal JPEG so thumb_for hit path can serve without sips if pre-seeded.
+        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF' + b'\x00' * 32 + b'\xff\xd9'
+        sample.write_bytes(jpeg)
+        (work / 'screenshots').mkdir(parents=True)
+        (work / 'screenrecords').mkdir(parents=True)
+        (work / 'docs').mkdir(parents=True)
+        (work / 'things').mkdir(parents=True)
+        (work / 'inbox').mkdir(parents=True)
+        (work / '_vlogs').mkdir(parents=True)
+        (work / '_trash').mkdir(parents=True)
+        (work / '_meta' / 'stars').mkdir(parents=True)
+        thumb_root = work / '_meta' / 'thumbs'
+        rel = sample.relative_to(work)
+        seeded = thumb_root / rel.with_suffix('.jpg')
+        seeded.parent.mkdir(parents=True, exist_ok=True)
+        seeded.write_bytes(jpeg)
+
+        wb.clear_web_caches()
+        scan_calls = {'n': 0}
+        real_scan = wb.scan_buckets
+
+        def counting_scan(w):
+            scan_calls['n'] += 1
+            return real_scan(w)
+
+        old_scan = wb.scan_buckets
+        try:
+            wb.scan_buckets = counting_scan
+            # render_home must not trigger a second scan via page_shell.
+            html = wb.render_home(work).decode('utf-8')
+            check('render_home scans once', scan_calls['n'] == 1, detail=str(scan_calls['n']))
+            check('home still has 归档', '归档' in html)
+            # Second home within TTL: topbar cache → no new scan_buckets.
+            wb.render_home(work)
+            check(
+                'second home uses topbar cache',
+                scan_calls['n'] == 1,
+                detail=str(scan_calls['n']),
+            )
+            # page_shell alone without precomputed buckets still hits cache.
+            wb.page_shell('x', '<p>y</p>', work=work)
+            check(
+                'page_shell reuses topbar cache',
+                scan_calls['n'] == 1,
+                detail=str(scan_calls['n']),
+            )
+        finally:
+            wb.scan_buckets = old_scan
+            wb.clear_web_caches()
+
+        # status counts: second call must not re-walk (spy count_files_in).
+        count_calls = {'n': 0}
+        real_count = wb.count_files_in
+
+        def counting_files(p):
+            count_calls['n'] += 1
+            return real_count(p)
+
+        old_count = wb.count_files_in
+        try:
+            wb.count_files_in = counting_files
+            wb.clear_web_caches()
+            c1 = wb.get_status_counts(work)
+            n_after_first = count_calls['n']
+            c2 = wb.get_status_counts(work)
+            check('status first call walks', n_after_first > 0, detail=str(n_after_first))
+            check(
+                'status second call cached',
+                count_calls['n'] == n_after_first,
+                detail=f'{count_calls["n"]} vs {n_after_first}',
+            )
+            check('status counts stable', c1 == c2)
+        finally:
+            wb.count_files_in = old_count
+            wb.clear_web_caches()
+
+        # /thumb Cache-Control + ETag
+        class H(wb.Handler):
+            pass
+
+        H.work = work
+        H.thumb_root = thumb_root
+        httpd = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            url = f'http://127.0.0.1:{port}/thumb?p={urllib.parse.quote(str(rel))}'
+            with urllib.request.urlopen(url) as r:
+                cc = r.headers.get('Cache-Control') or ''
+                etag = r.headers.get('ETag') or ''
+                lm = r.headers.get('Last-Modified') or ''
+                body = r.read()
+            check('thumb Cache-Control present', 'max-age=' in cc, detail=repr(cc))
+            check('thumb ETag present', bool(etag), detail=repr(etag))
+            check('thumb Last-Modified present', bool(lm), detail=repr(lm))
+            check('thumb body is jpeg', body[:3] == b'\xff\xd8\xff')
+            req304 = urllib.request.Request(url, headers={'If-None-Match': etag})
+            try:
+                with urllib.request.urlopen(req304) as r304:
+                    st304 = r304.status
+            except urllib.error.HTTPError as e:
+                st304 = e.code
+            check('thumb If-None-Match → 304', st304 == 304, detail=str(st304))
+        finally:
+            httpd.shutdown()
+
+        # thumb_for hit path: no mkdir when JPEG already exists
+        mkdir_calls = []
+        real_mkdir = Path.mkdir
+
+        def spy_mkdir(self, *a, **kw):
+            mkdir_calls.append(str(self))
+            return real_mkdir(self, *a, **kw)
+
+        Path.mkdir = spy_mkdir
+        try:
+            got = wb.thumb_for(sample, work, thumb_root)
+        finally:
+            Path.mkdir = real_mkdir
+        check('thumb_for hit returns path', got == seeded)
+        check(
+            'thumb_for hit skips mkdir',
+            len(mkdir_calls) == 0,
+            detail=repr(mkdir_calls[:3]),
+        )
+
+
 def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
     test_dashboard_web_start_copy()
+    test_console_link_shows_dashboard_url()
     test_init_skeleton()
     test_run_commands_backup_and_pipeline()
     test_backup_validation()
@@ -1891,6 +2051,7 @@ def main():
     test_theme_bucket_shows_date_range()
     test_theme_start_month_reassign_and_validate()
     test_web_path_traversal_and_cors_hardening()
+    test_perf_quick_wins_cache_and_thumb_headers()
     print(f'\n{passed} passed, {failed} failed')
     sys.exit(1 if failed else 0)
 
