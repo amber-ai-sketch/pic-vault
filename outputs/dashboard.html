@@ -27,7 +27,12 @@
   }
 
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html {
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+    scroll-behavior: smooth;
+  }
 
   body {
     margin: 0;
@@ -36,6 +41,9 @@
     line-height: 1.5;
     background: var(--paper);
     min-height: 100vh;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -43,9 +51,9 @@
   :focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
   .wrap {
-    max-width: 1460px;
+    width: min(100%, 1320px);
     margin: 0 auto;
-    padding: 40px 28px 80px;
+    padding: 40px clamp(22px, 2.6vw, 32px) 80px;
   }
 
   .masthead {
@@ -650,11 +658,11 @@
     flex-direction: column;
     gap: 4px;
     position: absolute;
-    left: 0;
+    right: 0;
     top: calc(100% + 8px);
     z-index: 20;
     width: max-content;
-    max-width: min(24rem, 68vw);
+    max-width: min(24rem, calc(100vw - 48px));
     padding: 10px 12px;
     background: var(--paper);
     color: var(--ink);
@@ -667,8 +675,10 @@
     opacity: 0;
     visibility: hidden;
     transform: translateY(-2px);
+    transform-origin: top right;
     transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
     box-shadow: 0 8px 24px rgba(20, 20, 20, 0.08);
+    overflow-wrap: anywhere;
   }
   .step-tip > span { display: block; }
   .step-tip .tip-warn { color: var(--hazard); font-weight: 500; }
@@ -735,7 +745,7 @@
 
   .layout-shell {
     display: grid;
-    grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
     gap: 28px;
     align-items: start;
   }
@@ -870,6 +880,15 @@
     .metric .v { font-size: 1.05rem; }
     .metric.wide { grid-column: 1 / -1; }
     .path-line { grid-template-columns: 1fr; gap: 2px; }
+  }
+
+  @media (max-width: 1040px) {
+    .layout-shell {
+      grid-template-columns: 1fr;
+    }
+    .sidebar-stack {
+      position: static;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
