@@ -62,15 +62,16 @@ def test_dashboard_pipeline_button():
 
 
 def test_dashboard_web_start_copy():
-    print('\n1b. Dashboard one-click start + copy command')
+    print('\n1b. Dashboard copy command for web start')
     text = DASHBOARD.read_text(encoding='utf-8')
     check('keeps copy start command', "copyText('startCmd')" in text)
-    check('has startWebBtn', 'id="startWebBtn"' in text)
-    check('has startWebUi', 'async function startWebUi' in text)
-    check('has BOOT_URL', '8764/api/web/start' in text)
-    check('step 04 start uses startWebUi', 'id="webStartRunBtn"' in text and 'startWebUi(this)' in text)
+    check('no startWebBtn', 'id="startWebBtn"' not in text)
+    check('no startWebUi', 'async function startWebUi' not in text)
+    check('no BOOT_URL', '8764/api/web/start' not in text)
+    check('no webStartRunBtn', 'id="webStartRunBtn"' not in text)
     check('step 04 keeps open browse', 'id="openWebBtnStep"' in text)
-    check('boot helper script exists', (PROJECT_ROOT / 'scripts' / 'dashboard_boot.py').is_file())
+    check('open browse stays in same tab', "window.location.assign('http://localhost:' + WEB_PORT + '/')" in text)
+    check('open browse no longer new tab', "window.open('http://localhost:' + WEB_PORT + '/', '_blank')" not in text)
 
 
 def test_console_link_shows_dashboard_url():
@@ -147,6 +148,17 @@ def test_picvault_sync_uses_backup_env():
     text = PICVAULT.read_text(encoding='utf-8')
     check('BACKUP env in cmd_sync', 'local backup="${BACKUP:-${PICVAULT_BACKUP:-/Volumes/WD4T/MediaVault}}"' in text)
     check('no hardcoded WD4T-only sync apply', text.count('--backup "/Volumes/WD4T/MediaVault"') == 0)
+
+
+def test_picvault_sync_args_order_independent():
+    print('\n5b. picvault sync parses flags in any order')
+    text = PICVAULT.read_text(encoding='utf-8')
+    m = re.search(r'cmd_sync\(\) \{(?P<body>.*?)\n\}\n\n# === pipeline ===', text, re.S)
+    body = m.group('body') if m else ''
+    check('cmd_sync found', bool(body))
+    check('cmd_sync loops over flags', 'while [ $# -gt 0 ]' in body)
+    check('cmd_sync recognizes --verify anywhere', '--verify)' in body and 'verify="--verify"' in body)
+    check('cmd_sync recognizes --yes anywhere', '--yes)' in body and 'yes="--yes"' in body)
 
 
 def test_star_api_and_lightbox_sync():
@@ -2174,6 +2186,7 @@ def main():
     test_run_commands_backup_and_pipeline()
     test_backup_validation()
     test_picvault_sync_uses_backup_env()
+    test_picvault_sync_args_order_independent()
     test_star_api_and_lightbox_sync()
     test_things_reclassify_and_ui()
     test_live_pair_mov_fail_rolls_back()

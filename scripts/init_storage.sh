@@ -8,6 +8,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+canonicalize_path() {
+    python3 -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"
+}
+
 # Defaults
 WORK="${WORK:-/Volumes/Storage}"
 WITH_EXAMPLE_THEMES=0
@@ -44,13 +50,15 @@ done
 if [ "${DUPEGURU_TEST:-}" = "1" ]; then
     : # skip sandbox in test mode
 else
+    WORK="$(canonicalize_path "$WORK")"
     case "$WORK" in
         /Volumes/Storage|/Volumes/Storage/*) ;;
         /Volumes/YM/MediaVault|/Volumes/YM/MediaVault/*) ;;
         /Volumes/WD4T/MediaVault|/Volumes/WD4T/MediaVault/*) ;;
+        /Users/ym/Downloads/pic-test|/Users/ym/Downloads/pic-test/*) ;;
         *)
             echo "ERROR: --work $WORK is not in path whitelist" >&2
-            echo "  Allowed: /Volumes/Storage, /Volumes/WD4T/MediaVault, /Volumes/YM/MediaVault" >&2
+            echo "  Allowed: /Volumes/Storage, /Volumes/WD4T/MediaVault, /Volumes/YM/MediaVault, /Users/ym/Downloads/pic-test" >&2
             exit 1
             ;;
     esac
@@ -85,8 +93,8 @@ mkdir -p "$WORK/_meta/logs"
 
 # Create events.yaml (empty by default, opt-in for example)
 if [[ ! -f "$WORK/_meta/events.yaml" ]]; then
-    if [[ "$WITH_EXAMPLE_THEMES" == "1" ]] && [[ -f "$(dirname "$(readlink -f "$0")")/../outputs/events.example.yaml" ]]; then
-        cp "$(dirname "$(readlink -f "$0")")/../outputs/events.example.yaml" "$WORK/_meta/events.yaml"
+    if [[ "$WITH_EXAMPLE_THEMES" == "1" ]] && [[ -f "$SCRIPT_DIR/../outputs/events.example.yaml" ]]; then
+        cp "$SCRIPT_DIR/../outputs/events.example.yaml" "$WORK/_meta/events.yaml"
         echo "✓ Seeded _meta/events.yaml from example (includes sample themes: 海南/夏令营/重要证件照)"
     else
         # Empty events.yaml with commented example (no live themes)

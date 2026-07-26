@@ -2,7 +2,7 @@
 
 ## Summary
 
-三盘架构 + 严格路径沙箱：工作盘 `/Volumes/Storage`（500G 机械）日常处理；备份盘 `/Volumes/WD4T/MediaVault/`（4T 机械）只接收 rsync 镜像；首次启动用 SSD `/Volumes/YM` 做迁移工作区。**脚本严格只读写这三个路径**。
+三盘架构 + 严格路径沙箱：工作盘 `/Volumes/Storage`（500G 机械）日常处理；备份盘 `/Volumes/WD4T/MediaVault/`（4T 机械）只接收 rsync 镜像；首次启动用 SSD `/Volumes/YM/MediaVault` 做迁移工作区。**脚本正式只读写这三个路径**；`/Users/ym/Downloads/pic-test` 仅用于自测。
 
 流水线：手动导入到 inbox → dedupe（SHA-256）→ rename_organize（by-date + screenshots + screenrecords，v7 分类）→ rsync 到 WD4T。精选走 `_favorite/` 真实复制 + AppleScript（`skip checking duplicates yes` + 打 favorite）。AppleScript 中带主题 → 相册名=主题名；无主题 → 相册名固定 `"Picks"`。iCloud Photos 已开启，AppleScript 跑完后自动同步到 iPhone。Vlog 推荐 iMovie。**首次迁移用户自行在 `/Volumes/YM/MediaVault/_pre_migration_backup/` 放好原始数据**，脚本只负责 stage → 处理 → rsync 回 WD4T。SD 卡格式化和工作盘清空人工完成。
 
@@ -14,7 +14,7 @@
 | `/Volumes/WD4T/MediaVault/` | 备份库（4T 机械），外层其他内容不动 |
 | `/Volumes/YM/MediaVault/` | 迁移 SSD，首次启动一次性 |
 
-脚本启动校验三个路径都在白名单内。临时文件 `/tmp/PicVault-<pid>/`。
+脚本启动校验正式路径都在白名单内；`/Users/ym/Downloads/pic-test` 仅用于自测。临时文件 `/tmp/PicVault-<pid>/`。
 
 ## 总体架构
 
@@ -29,7 +29,7 @@ flowchart TB
     D5[理光 GR]
   end
 
-  subgraph SSD["④ 迁移 SSD /Volumes/YM 一次性"]
+  subgraph SSD["④ 迁移 SSD /Volumes/YM/MediaVault 一次性"]
     SB["MediaVault/_pre_migration_backup<br/>用户手动放置 脚本只读"]
     SW["MediaVault/working/<br/>脚本 stage + 处理"]
     SB -->|"onboard_migrate"| SW
@@ -122,7 +122,7 @@ flowchart TB
 | ① | 源设备 | 5 种设备：iPhone / Android / SD卡 / DJI / 理光 GR |
 | ② | 工作盘 `/Volumes/Storage` | 500G 机械；日常写入和处理 |
 | ③ | 备份盘 `/Volumes/WD4T/MediaVault` | 4T 机械；rsync 镜像，只增不删 |
-| ④ | 迁移 SSD `/Volumes/YM` | 一次性；首次启动迁移用 |
+| ④ | 迁移 SSD `/Volumes/YM/MediaVault` | 一次性；首次启动迁移用 |
 | ⑤ | iCloud Photos | 已开启；macOS Photos → iCloud → iPhone 自动同步 |
 | ⑥ | 人工 | 脚本不参与的 7 个动作 |
 
@@ -480,7 +480,7 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
 | `pick_to_iphone.py` | 加星文件真实复制到 `_favorite/` + 生成 AppleScript |
 | `make_vlog.py` | 可选：EDL JSON + ffmpeg 轻量 vlog |
 
-每个脚本启动校验 `--work` `--backup` `--migration-ssd` 在白名单内。
+每个脚本启动校验 `--work` `--backup` 在白名单内。
 
 > 之前版本里的 `snapshot` 子命令已**移除**（用户自行在 SSD 上准备数据）。
 
@@ -641,7 +641,7 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 
 ### 关键承诺
 
-1. **路径沙箱**：脚本只读写 `/Volumes/Storage` `/Volumes/WD4T/MediaVault` `/Volumes/YM`
+1. **路径沙箱**：脚本只读写 `/Volumes/Storage` `/Volumes/WD4T/MediaVault` `/Volumes/YM/MediaVault`
 2. **WD4T 备份库永不直接被脚本写入**（首次迁移的数据用户自己放在 SSD 上）
 3. **WD4T 内容默认只增不减**：rsync 不带 `--delete`；`--prune` 二次确认
 4. **首次迁移的 `_pre_migration_backup/` 完全不动**（用户管理 + 脚本只读）
@@ -651,7 +651,7 @@ Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 | # | 风险 | 缓解措施 |
 |---|---|---|
 | R1 | 工作盘故障 | 每次 batch `sync_to_backup.sh --verify` |
-| R2 | 工作盘手动清空过早 | 看 `_meta/logs/sync-verify.log` |
+| R2 | 工作盘手动清空过早 | 看 `_meta/logs/sync-*.log` |
 | R3 | WD4T 故障 | 从工作盘重 rsync；每月 `diskutil info` |
 | R4 | rsync `--delete` 误删 WD4T | 默认不带；`--prune` 二次确认 |
 | R5 | 脚本误操作 WD4T 其他内容 | rsync `--include` 白名单限定 |
@@ -718,10 +718,10 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 
 | 决策 | 选择 |
 |---|---|
-| 路径沙箱 | 脚本只读写 `/Volumes/Storage` `/Volumes/WD4T/MediaVault` `/Volumes/YM` |
+| 路径沙箱 | 脚本只读写 `/Volumes/Storage` `/Volumes/WD4T/MediaVault` `/Volumes/YM/MediaVault` |
 | 备份盘 | `/Volumes/WD4T`（4T），库根 `/MediaVault/` |
 | 工作盘 | `/Volumes/Storage`（500G）|
-| 迁移 SSD | `/Volumes/YM`（一次性）|
+| 迁移 SSD | `/Volumes/YM/MediaVault`（一次性）|
 | 备份盘写入策略 | 默认 append-only；rsync `--include` 白名单 |
 | 设备导入 | 全部手动拖拽 |
 | inbox 结构 | 任意 |
@@ -754,7 +754,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 
 ## 关键假设
 
-1. 迁移 SSD `/Volumes/YM` 容量 ≥ 现有 MediaVault 库大小
+1. 迁移 SSD `/Volumes/YM/MediaVault` 容量 ≥ 现有 MediaVault 库大小
 2. macOS 自带 `sips` `osascript` `rsync` `diskutil` `mdls`
 3. macOS Photos.app 已启用 iCloud Photos
 4. 用户 iCloud 存储 ≥ 当前库大小
@@ -764,7 +764,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 
 ## 验收与测试
 
-- **路径沙箱测试**：`--work /Users/foo` / `--backup /Volumes/WD4T` / `--migration-ssd /Volumes/Other` 全部拒绝执行
+- **路径沙箱测试**：`--work /Users/foo` / `--backup /Volumes/WD4T` 拒绝执行；`--work /Users/ym/Downloads/pic-test` 允许自测
 - `dedupe.py`：5 对重复 → 识别 5 对
 - `dedupe.py` 源识别：iPhone/Canon/DJI/CLI/省略各路径
 - `rename_organize.py`：30 文件 + 主题 → 18+12；幂等

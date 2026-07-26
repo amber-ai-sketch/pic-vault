@@ -29,7 +29,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault', '/Users/ym/Downloads/pic-test')
 ALLOWED_BACKUP_PREFIXES = ('/Volumes/WD4T/MediaVault', '/Volumes/YM/MediaVault')
 THUMB_CACHE = '_meta/thumbs'
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.hevc', '.webm'}
@@ -928,7 +928,7 @@ PAGE_CSS = '''
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body {
+  body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--sans);
@@ -1707,6 +1707,7 @@ body.select-mode .cell .fname {
   html { scroll-behavior: auto; }
   .chip, .btn-reclass, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
+
 '''
 
 PAGE_JS = '''
@@ -4139,7 +4140,6 @@ def main():
 
         # --- init / web lifecycle ---
         'init':         lambda _b: ['bash', str(INIT_SCRIPT), '--work', w],
-        'web_start':    lambda _b: [pb, 'web', 'start'],
         'web_stop':     lambda _b: [pb, 'web', 'stop'],
 
         # --- dedupe (dry-run by default; apply moves files) ---
