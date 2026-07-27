@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Sandbox whitelist
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault', '/Users/ym/Downloads/pic-test')
 ALLOWED_BACKUP_PREFIXES = ('/Volumes/WD4T/MediaVault',)
 ALLOWED_SSD_PREFIXES = ('/Volumes/YM/MediaVault',)
 

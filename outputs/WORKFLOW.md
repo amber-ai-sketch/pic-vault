@@ -34,19 +34,18 @@ python3 -c "import flask; print('Flask OK')" || pip3 install --user Pillow Flask
 which ffmpeg || brew install ffmpeg
 
 # 三个盘都挂载
-ls -d /Volumes/Storage /Volumes/WD4T /Volumes/YM
+ls -d /Volumes/Storage /Volumes/WD4T/MediaVault /Volumes/YM/MediaVault
 ```
 
 ### 2. 安装项目
 
 把整个项目目录放到 `~/code/PicVault/`（或任意位置）。脚本里的路径都用绝对路径，不依赖安装位置。
 
-### 3. 配置
+### 3. 配置参考
 
-```bash
-cp config.example.yaml config.yaml
-$EDITOR config.yaml   # 检查路径是否一致
-```
+`outputs/config.example.yaml` 只作字段/路径参考，CLI 不直接读取这个 YAML。
+
+如果要改默认工作盘，直接用 `WORK` 或 `PICVAULT_WORK`；日常命令仍以 `--work` / `--backup` 为准。
 
 ### 4. 初始化工作盘
 
@@ -67,7 +66,7 @@ $EDITOR config.yaml   # 检查路径是否一致
 
 ```bash
 # 挂载 SSD，确认路径
-ls /Volumes/YM
+ls -d /Volumes/YM/MediaVault
 
 # 创建备份目录并放数据
 mkdir -p /Volumes/YM/MediaVault/_pre_migration_backup
@@ -256,11 +255,11 @@ picvault theme rebucket --theme <主题名> --yes   # 让该主题配置生效�
 ```bash
 # 带主题
 ./scripts/pick_to_iphone.py --bucket 2026-07_海南
-# 复制到 _favorite/2026-07_海南/，生成 favorite-2026-07_海南.scpt
+# 刷新 _favorite/2026-07_海南/，生成 favorite-2026-07_海南.scpt
 
 # 无主题
 ./scripts/pick_to_iphone.py --bucket 2026-08
-# 复制到 _favorite/ 根，生成 favorite-2026-08.scpt
+# 刷新 _favorite/2026-08/，生成 favorite-2026-08.scpt（Photos 相簿名仍为 Picks）
 ```
 
 ### 8. 跑 AppleScript
@@ -303,7 +302,7 @@ AppleScript 自动打开 Photos.app、建相簿、导入、打星标。
 # （人工）SD 卡格式化（在 macOS 磁盘工具里）
 
 # （人工）工作盘清空
-# 确认 _meta/logs/sync-verify.log 最新一次成功后，可以删：
+# 确认 _meta/logs/sync-*.log 最新一次成功后，可以删：
 #   - /Volumes/Storage/inbox/
 #   - /Volumes/Storage/_trash/ 里超过 30 天的文件
 ```
@@ -404,10 +403,10 @@ diskutil info /Volumes/WD4T | grep -E "Volume Name|Total Size|Used Space|SMART S
 
 ```
 ERROR: --work /Users/foo is not in path whitelist
-  Allowed: /Volumes/Storage, /Volumes/WD4T/MediaVault, /Volumes/YM
+  Allowed: /Volumes/Storage, /Volumes/WD4T/MediaVault, /Volumes/YM/MediaVault, /Users/ym/Downloads/pic-test
 ```
 
-解决：传正确的 `--work` / `--backup` / `--migration-ssd` 参数，或改 `config.yaml` 的 paths 配置。
+解决：传正确的 `--work` / `--backup` 参数；`/Users/ym/Downloads/pic-test` 仅用于自测。
 
 ### dedupe 没识别重复
 
@@ -467,4 +466,3 @@ error "Photos got an error: ..." number -1
 | 看运行日志 | `tail -f /Volumes/Storage/_meta/logs/*.log` |
 | 看 WD4T 状态 | `diskutil info /Volumes/WD4T` |
 | 看 iCloud 状态 | 系统设置 → Apple ID → iCloud |
-
