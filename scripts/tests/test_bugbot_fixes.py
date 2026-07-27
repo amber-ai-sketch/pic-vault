@@ -2180,6 +2180,18 @@ def test_gallery_pagination():
         'filter tip copy',
         '先加载更多，再筛选' in wb._gallery_toolbar(1, 0, paginated=True),
     )
+    # Starred filter hides non-star cells (display:none), so #galleryMore stays in
+    # viewport and IntersectionObserver would otherwise cascade-load the whole library.
+    check(
+        'IO auto-load has galleryAutoLoadAllowed gate',
+        'function galleryAutoLoadAllowed' in wb.PAGE_JS
+        and 'galleryAutoLoadAllowed()' in wb.PAGE_JS,
+        detail='IntersectionObserver must not auto-load while 「仅加星」 is active',
+    )
+    check(
+        'IO disconnects when paging ends',
+        'galleryIO' in wb.PAGE_JS and 'galleryIO.disconnect()' in wb.PAGE_JS,
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
