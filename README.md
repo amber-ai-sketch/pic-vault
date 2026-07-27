@@ -97,14 +97,14 @@ The dashboard shows:
 - Live file counts (polls `/api/status` every 5s when Web UI is running; `initialized` reflects whether the work disk skeleton exists)
 - One-click copy / run for `init` and the rest of the pipeline (Run 输出支持流式进度)
 - Run 日志落在 `_meta/logs/runs/`，dashboard 可回看/断线续看；长任务不限时
-- Buttons to start/stop Web UI
+- Copy command to start Web UI from terminal, plus stop/open controls
 
 ## Installation
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/PicVault.git
-cd PicVault
+git clone https://github.com/yms-666/pic-vault.git
+cd pic-vault
 
 # (Optional) Install CLI globally
 mkdir -p ~/.local/bin
@@ -128,7 +128,7 @@ Run `picvault doctor` to check your setup.
 - [`outputs/PLAN.md`](./outputs/PLAN.md) — Full design rationale
 - [`outputs/WORKFLOW.md`](./outputs/WORKFLOW.md) — Step-by-step operations manual
 - [`outputs/dashboard.html`](./outputs/dashboard.html) — Single-file web UI
-- [`outputs/config.example.yaml`](./outputs/config.example.yaml) — Configuration template
+- [`outputs/config.example.yaml`](./outputs/config.example.yaml) — Configuration reference only
 - [`outputs/events.example.yaml`](./outputs/events.example.yaml) — Theme config example
 
 ## License

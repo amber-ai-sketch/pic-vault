@@ -25,6 +25,7 @@ ALLOWED_PREFIXES=(
     "/Volumes/Storage"
     "/Volumes/WD4T/MediaVault"
     "/Volumes/YM/MediaVault"
+    "/Users/ym/Downloads/pic-test"
 )
 
 # Test bypass
@@ -97,6 +98,43 @@ sanitize_bucket() {
     return 0
 }
 
+resolve_work_rel_path() {
+    local raw="$1"
+    local require_file="${2:-0}"
+    python3 - "$WORK" "$raw" "$require_file" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+work = Path(sys.argv[1]).expanduser().resolve()
+raw = sys.argv[2] if len(sys.argv) > 2 else ''
+require_file = (sys.argv[3] == '1') if len(sys.argv) > 3 else False
+
+if not raw or '\0' in raw:
+    print('invalid file path', file=sys.stderr)
+    sys.exit(1)
+
+p = Path(raw).expanduser()
+if p.is_absolute():
+    full = p.resolve()
+else:
+    if '..' in p.parts:
+        print('path escapes work', file=sys.stderr)
+        sys.exit(1)
+    full = (work / p).resolve()
+
+if full != work and not str(full).startswith(str(work) + os.sep):
+    print(f'path outside work: {raw}', file=sys.stderr)
+    sys.exit(1)
+
+if require_file and not full.is_file():
+    print(f'path not found: {raw}', file=sys.stderr)
+    sys.exit(1)
+
+print(os.path.relpath(full, work))
+PY
+}
+
 # Path check is deferred for commands that do not need a work disk
 # (help / doctor). Others still sandbox WORK after global --work parsing.
 _needs_work_check() {
@@ -133,6 +171,17 @@ last_sync_time() {
     find "$log_dir" -name "sync-*.log" 2>/dev/null | sort -r | head -1
 }
 
+web_current_port() {
+    local port_file="$WORK/_meta/web.port"
+    [ -f "$port_file" ] || return 1
+    local p
+    p="$(cat "$port_file" 2>/dev/null)" || return 1
+    case "$p" in
+        ''|*[!0-9]*) return 1 ;;
+        *) echo "$p" ;;
+    esac
+}
+
 # ============================================================
 # Commands
 # ============================================================
@@ -162,7 +211,6 @@ Web UI:
   web restart                   Restart
   web logs [--follow]           Show web UI logs
   web open                      Open web UI in default browser
-  boot start                    Local helper so dashboard「启动」can spawn web (127.0.0.1:8764)
 
 Star / favorites:
   star <bucket> <file>         Mark a file as starred (terminal-friendly)
@@ -221,7 +269,9 @@ cmd_status() {
 
         local web_pid_file="$WORK/_meta/web.pid"
         if [ -f "$web_pid_file" ] && kill -0 "$(cat "$web_pid_file")" 2>/dev/null; then
-            echo -e "  Web UI:        ${GREEN}running${NC} (pid $(cat "$web_pid_file")) http://localhost:8765/"
+            local web_port
+            web_port="$(web_current_port 2>/dev/null || echo 8765)"
+            echo -e "  Web UI:        ${GREEN}running${NC} (pid $(cat "$web_pid_file")) http://localhost:$web_port/"
         else
             echo -e "  Web UI:        ${YELLOW}not running${NC}  →  picvault web start"
         fi
@@ -266,8 +316,13 @@ cmd_sync() {
     local verify=""
     local yes=""
     local backup="${BACKUP:-${PICVAULT_BACKUP:-/Volumes/WD4T/MediaVault}}"
-    [ "$1" = "--verify" ] && { verify="--verify"; shift; }
-    [ "$1" = "--yes" ] && yes="--yes"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --verify) verify="--verify"; shift ;;
+            --yes) yes="--yes"; shift ;;
+            *) err "Unknown sync option: $1"; return 1 ;;
+        esac
+    done
     if [ -z "$yes" ]; then
         warn "Running in dry-run mode. Use --yes to actually sync."
         bash "$SCRIPTS_DIR/sync_to_backup.sh" --work "$WORK" --backup "$backup" --dry-run
@@ -294,23 +349,36 @@ cmd_pipeline() {
 
 # === web ===
 cmd_web() {
-    local action="$1"
+    local action="${1:-}"
+    if [ -z "$action" ]; then
+        err "Usage: picvault web {start|stop|restart|status|logs|open} [--port N]"
+        return 1
+    fi
     shift
-    local port="8765"
+    local port=""
     local follow=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --port) port="$2"; shift 2 ;;
+            --port)
+                if [ -z "${2:-}" ]; then
+                    err "--port requires a value"
+                    return 1
+                fi
+                port="$2"; shift 2 ;;
             --follow|-f) follow="--follow"; shift ;;
             *) shift ;;
         esac
     done
 
     local pid_file="$WORK/_meta/web.pid"
+    local port_file="$WORK/_meta/web.port"
     local log_file="$WORK/_meta/logs/web.log"
+    local stored_port
+    stored_port="$(web_current_port 2>/dev/null || true)"
 
     case "$action" in
         start)
+            [ -n "$port" ] || port="8765"
             # Ensure dirs exist
             mkdir -p "$WORK/_meta/logs" "$WORK/_meta/thumbs"
             if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
@@ -323,9 +391,11 @@ cmd_web() {
             echo $! > "$pid_file"
             sleep 1
             if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+                echo "$port" > "$port_file"
                 ok "Web UI started (pid $(cat "$pid_file"))"
                 info "Open: http://localhost:$port/"
             else
+                rm -f "$pid_file" "$port_file"
                 err "Web UI failed to start. Check: tail $log_file"
             fi
             ;;
@@ -341,14 +411,16 @@ cmd_web() {
             else
                 warn "Web UI process not running (stale pid file)"
             fi
-            rm -f "$pid_file"
+            rm -f "$pid_file" "$port_file"
             ;;
         restart)
+            [ -n "$port" ] || port="${stored_port:-8765}"
             cmd_web stop
             sleep 1
             cmd_web start --port "$port"
             ;;
         status)
+            [ -n "$port" ] || port="${stored_port:-8765}"
             if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
                 ok "Web UI running (pid $(cat "$pid_file"))"
                 info "URL: http://localhost:$port/"
@@ -365,27 +437,13 @@ cmd_web() {
             fi
             ;;
         open)
+            [ -n "$port" ] || port="${stored_port:-8765}"
             url="http://localhost:$port/"
             open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "Open manually: $url"
             ;;
         *)
             err "Unknown web action: $action"
             info "Try: picvault web {start|stop|restart|status|logs|open}"
-            return 1
-            ;;
-    esac
-}
-
-# === boot helper (file:// dashboard one-click start) ===
-cmd_boot() {
-    local action="${1:-start}"
-    case "$action" in
-        start)
-            exec python3 "$SCRIPTS_DIR/dashboard_boot.py"
-            ;;
-        *)
-            err "Unknown boot action: $action"
-            info "Try: picvault boot start"
             return 1
             ;;
     esac
@@ -400,6 +458,11 @@ cmd_star() {
         return 1
     fi
     sanitize_bucket "$bucket" || return 1
+    local rel_file
+    if ! rel_file="$(resolve_work_rel_path "$file" 1)"; then
+        err "invalid file for star: $file"
+        return 1
+    fi
     local stars_file="$WORK/_meta/stars/${bucket}.json"
     mkdir -p "$(dirname "$stars_file")"
     if [ ! -f "$stars_file" ]; then
@@ -411,8 +474,8 @@ p = sys.argv[1]
 with open(p) as f: stars = json.load(f)
 stars[sys.argv[2]] = True
 with open(p, 'w') as f: json.dump(stars, f, indent=2, ensure_ascii=False)
-" "$stars_file" "$file"
-    ok "Starred: $file → $bucket"
+" "$stars_file" "$rel_file"
+    ok "Starred: $rel_file → $bucket"
 }
 
 cmd_unstar() {
@@ -423,6 +486,11 @@ cmd_unstar() {
         return 1
     fi
     sanitize_bucket "$bucket" || return 1
+    local rel_file
+    if ! rel_file="$(resolve_work_rel_path "$file" 0)"; then
+        err "invalid file for unstar: $file"
+        return 1
+    fi
     local stars_file="$WORK/_meta/stars/${bucket}.json"
     [ -f "$stars_file" ] || { warn "No stars for $bucket"; return; }
     python3 -c "
@@ -431,8 +499,8 @@ p = sys.argv[1]
 with open(p) as f: stars = json.load(f)
 stars.pop(sys.argv[2], None)
 with open(p, 'w') as f: json.dump(stars, f, indent=2, ensure_ascii=False)
-" "$stars_file" "$file"
-    ok "Unstarred: $file"
+" "$stars_file" "$rel_file"
+    ok "Unstarred: $rel_file"
 }
 
 cmd_favorites() {
@@ -724,9 +792,6 @@ main() {
             ;;
         web)
             cmd_web "$@"
-            ;;
-        boot)
-            cmd_boot "$@"
             ;;
         star)
             cmd_star "$@"

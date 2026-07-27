@@ -70,7 +70,7 @@ else
     BACKUP="$(_canonicalize "$BACKUP")"
 
     WORK_OK=0
-    for prefix in /Volumes/Storage /Volumes/YM/MediaVault; do
+    for prefix in /Volumes/Storage /Volumes/YM/MediaVault /Users/ym/Downloads/pic-test; do
         prefix_r="$(_canonicalize "$prefix" 2>/dev/null || echo "$prefix")"
         if _under_prefix "$WORK" "$prefix_r"; then
             WORK_OK=1
@@ -79,7 +79,7 @@ else
     done
     if [[ "$WORK_OK" -ne 1 ]]; then
         echo "ERROR: --work $WORK is not in path whitelist" >&2
-        echo "  Allowed: /Volumes/Storage, /Volumes/YM/MediaVault" >&2
+        echo "  Allowed: /Volumes/Storage, /Volumes/YM/MediaVault, /Users/ym/Downloads/pic-test" >&2
         exit 1
     fi
 
@@ -101,6 +101,15 @@ fi
 # Sanity checks
 [[ -d "$WORK" ]] || { echo "ERROR: $WORK not found" >&2; exit 1; }
 [[ -d "$BACKUP" ]] || { echo "ERROR: $BACKUP not found" >&2; exit 1; }
+
+# Persist real sync output so CLI / Web can show the latest run.
+if [[ -z "$DRY_RUN" ]]; then
+    mkdir -p "$WORK/_meta/logs"
+    SYNC_LOG_FILE="$WORK/_meta/logs/sync-$(date +%Y%m%d-%H%M%S)-$$.log"
+    : > "$SYNC_LOG_FILE"
+    exec > >(tee -a "$SYNC_LOG_FILE") 2>&1
+    echo "→ Logging to $SYNC_LOG_FILE"
+fi
 
 # Build rsync args
 # Include only specific subdirs to avoid touching backup root's other content

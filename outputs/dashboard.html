@@ -6,27 +6,33 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>PicVault — 盘点</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/400.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/500.css">
+<title>PicVault｜盘点</title>
 <style>
   :root {
-    --paper: #FFFFFF;
-    --mist: #F4F4F4;
-    --ink: #111111;
-    --muted: #6B6B6B;
-    --line: #E6E6E6;
-    --live: #1F7A4D;
-    --warn: #8A6A1F;
-    --hazard: #9B2C2C;
+    --paper: #FFFFFC;
+    --mist: #F4F2EC;
+    --ink: #11100E;
+    --muted: #66625B;
+    --line: #DDD9CF;
+    --live: #236F4C;
+    --warn: #886318;
+    --hazard: #8E2F28;
     --bg: var(--paper);
     --soft: var(--mist);
-    --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --sans: "PingFang SC", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-md: 1rem;
   }
 
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html {
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+    scroll-behavior: smooth;
+  }
 
   body {
     margin: 0;
@@ -35,6 +41,9 @@
     line-height: 1.5;
     background: var(--paper);
     min-height: 100vh;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -42,18 +51,19 @@
   :focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
   .wrap {
-    max-width: 880px;
+    width: min(100%, 1320px);
     margin: 0 auto;
-    padding: 48px 36px 88px;
+    padding: 40px clamp(22px, 2.6vw, 32px) 80px;
   }
 
   .masthead {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 16px 28px;
     align-items: end;
-    padding-bottom: 0;
-    border-bottom: none;
+    padding-bottom: 18px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--line);
   }
 
   .brand {
@@ -68,7 +78,7 @@
 
   .tagline {
     margin: 10px 0 0;
-    font-size: 0.88rem;
+    font-size: var(--text-sm);
     color: var(--muted);
     font-weight: 400;
     letter-spacing: 0.01em;
@@ -79,7 +89,7 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 10px;
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     color: var(--muted);
   }
   .web-status-row {
@@ -87,7 +97,7 @@
     align-items: center;
     gap: 8px;
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.02em;
   }
   .dot {
@@ -95,29 +105,29 @@
     background: var(--muted); flex-shrink: 0;
   }
   .dot.running { background: var(--live); }
-  .dot.stopped { background: #C8C6C0; }
+  .dot.stopped { background: #C9C5B8; }
   #openWebBtn { display: none; }
   body.web-live #openWebBtn { display: inline-block; }
   .web-status .btn-row { margin-top: 0; justify-content: flex-end; }
   /* Offline: alert below owns the CTA; header keeps brand only */
   body:not(.web-live) .web-status { display: none; }
 
-  .section { margin-top: 48px; }
+  .section { margin-top: 40px; }
   .library-section {
-    margin-top: 28px;
+    margin-top: 0;
   }
   .section-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
   }
   .section-label {
     margin: 0;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
     letter-spacing: 0.08em;
@@ -125,7 +135,7 @@
   }
   .section-title {
     margin: 6px 0 0;
-    font-size: 0.9rem;
+    font-size: var(--text-sm);
     font-weight: 400;
     color: var(--muted);
   }
@@ -153,20 +163,20 @@
     min-width: 0;
   }
   .path-chip .k {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--muted);
     letter-spacing: 0.06em;
     text-transform: uppercase;
   }
   .path-chip .v {
     font-family: var(--mono);
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
     word-break: break-all;
   }
   .paths-root-hint {
     margin: 0;
     font-family: var(--mono);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     color: var(--muted);
     word-break: break-all;
   }
@@ -180,10 +190,10 @@
     border-bottom: 1px solid var(--line);
   }
   .path-line:last-child { border-bottom: none; }
-  .path-line .k { font-size: 0.78rem; color: var(--muted); }
+  .path-line .k { font-size: var(--text-xs); color: var(--muted); }
   .path-line .v {
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     word-break: break-all;
   }
 
@@ -196,27 +206,27 @@
 
   .path-field label {
     display: block;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
     letter-spacing: 0.04em;
     margin-bottom: 6px;
   }
   .path-field .hint {
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     color: var(--muted);
     margin: 0 0 6px;
   }
   .path-field .hint.warn { color: var(--warn); margin-top: 6px; }
   .path-field .hint code {
     font-family: var(--mono);
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
   }
   .path-field input,
   .path-field .path-auto {
     width: 100%;
     font-family: var(--mono);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     padding: 11px 12px;
     border: none;
     border-radius: 0;
@@ -237,17 +247,17 @@
     flex-wrap: wrap;
   }
 
-  /* Library inventory: wide strip — more cols, shorter cells */
+  /* Library inventory: compact sidebar grid */
   .library-list {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1px;
     background: var(--line);
     border: 1px solid var(--line);
   }
   .metric {
     background: var(--paper);
-    padding: 12px 12px 14px;
+    padding: 13px 12px 15px;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -255,35 +265,37 @@
     gap: 8px;
   }
   .metric .k {
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
     letter-spacing: 0.05em;
-    text-transform: lowercase;
+    text-transform: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .metric .v {
-    font-family: var(--mono);
-    font-size: 1.25rem;
+    font-family: var(--sans);
+    font-size: 1.18rem;
     font-weight: 500;
     letter-spacing: -0.04em;
     line-height: 1;
     color: var(--ink);
+    font-variant-numeric: tabular-nums;
   }
   .metric .v.is-empty {
-    color: var(--line);
+    color: var(--muted);
     font-weight: 400;
-    font-size: 1.1rem;
+    font-size: var(--text-sm);
+    letter-spacing: 0;
   }
   .metric .v.is-empty::before {
-    content: '·';
-    color: var(--line);
+    content: '—';
+    color: var(--muted);
   }
   .metric.wide { grid-column: 1 / -1; }
-  .metric.wide .v { font-size: 0.88rem; word-break: break-all; letter-spacing: -0.02em; }
-  .metric.wide .v.is-empty { font-size: 0.88rem; }
+  .metric.wide .v { font-size: var(--text-sm); word-break: break-all; letter-spacing: -0.01em; }
+  .metric.wide .v.is-empty { font-size: var(--text-sm); }
 
   body:not(.web-live) .library-section {
     display: none;
@@ -292,15 +304,6 @@
     opacity: 0.42;
     pointer-events: none;
   }
-  #startWebFeedback {
-    margin: 10px 0 0;
-    font-size: 0.82rem;
-    color: var(--muted);
-  }
-  #startWebFeedback.ok { color: var(--live); }
-  #startWebFeedback.err { color: var(--hazard); }
-
-
   .alert {
     display: none;
     margin-top: 24px;
@@ -308,17 +311,22 @@
     background: var(--mist);
     border-left: 1px solid var(--hazard);
   }
+  .sidebar-stack .alert,
+  .sidebar-stack .library-section,
+  .sidebar-stack .paths-panel {
+    margin-top: 0;
+  }
   .alert.warn { border-left-color: var(--warn); }
   .alert.visible { display: block; }
-  .alert p { margin: 0 0 10px; font-size: 0.88rem; }
+  .alert p { margin: 0 0 10px; font-size: var(--text-sm); }
   .alert .alert-lead {
-    font-size: 0.95rem;
+    font-size: var(--text-md);
     font-weight: 500;
     color: var(--ink);
     margin-bottom: 6px;
   }
   .alert .alert-sub {
-    font-size: 0.82rem;
+    font-size: var(--text-xs);
     color: var(--muted);
     margin-bottom: 12px;
   }
@@ -328,7 +336,7 @@
     background: var(--mist);
     padding: 11px 12px;
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     overflow-x: auto;
     white-space: pre;
     border: none;
@@ -350,7 +358,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
     letter-spacing: 0.04em;
@@ -361,7 +369,7 @@
   .cmd-fold > summary::-webkit-details-marker { display: none; }
   .cmd-fold > summary::before {
     content: '›';
-    font-size: 0.9rem;
+    font-size: var(--text-sm);
     line-height: 1;
     transition: transform 0.12s ease;
   }
@@ -382,12 +390,12 @@
     border-left: 1px solid var(--line);
     background: var(--mist);
     padding: 0 14px;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
   }
   .cmd-row .cmd-copy:hover:not(:disabled) {
-    background: #E8E6E1;
+    background: #E9E5DA;
     color: var(--ink);
   }
   .cmd-row .cmd-copy.copied {
@@ -410,7 +418,7 @@
     padding: 8px 16px;
     border-radius: 0;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     font-family: var(--sans);
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -429,8 +437,8 @@
     border-color: var(--ink);
   }
   button.primary:hover:not(:disabled) {
-    background: #2a2a2a;
-    border-color: #2a2a2a;
+    background: #24231F;
+    border-color: #24231F;
   }
   button.danger {
     border-color: var(--hazard);
@@ -453,9 +461,96 @@
     background: var(--mist);
   }
 
-  .pipeline-section { margin-top: 56px; }
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .dashboard-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    position: sticky;
+    top: 18px;
+    align-self: start;
+  }
+
+  .dashboard-main {
+    min-width: 0;
+  }
+
+  .panel {
+    padding: 18px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+  }
+
+  .panel.tight {
+    padding: 16px;
+  }
+
+  .panel .section-head {
+    margin-bottom: 12px;
+  }
+
+  .panel .section-head:last-child {
+    margin-bottom: 0;
+  }
+
+  .output-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .output-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 13px 13px;
+    background: #FAF8F3;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line);
+  }
+
+  .output-card.output-wide {
+    grid-column: 1 / -1;
+  }
+
+  .output-card.tone-live { border-left-color: var(--live); }
+  .output-card.tone-warn { border-left-color: var(--warn); }
+  .output-card.tone-hazard { border-left-color: var(--hazard); }
+
+  .output-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .output-card pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    max-height: 360px;
+    overflow: auto;
+  }
+
+  .output-label {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    text-transform: none;
+  }
+
+  .pipeline-section { margin-top: 0; }
   .pipeline-head {
-    margin-bottom: 16px;
+    margin-bottom: 14px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--line);
   }
@@ -463,45 +558,64 @@
   .pipeline-progress {
     margin: 8px 0 0;
     color: var(--muted);
-    font-family: var(--mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.02em;
+    font-family: var(--sans);
+    font-size: var(--text-xs);
+    letter-spacing: 0;
   }
 
   .steps {
     display: flex;
     flex-direction: column;
+    gap: 12px;
   }
 
   .step {
-    padding: 26px 0 26px 16px;
-    border-bottom: 1px solid var(--line);
-    border-left: 1px solid transparent;
-    background: transparent;
-    transition: border-color 0.12s ease, background 0.12s ease;
+    padding: 16px 16px 15px;
+    border: 1px solid var(--line);
+    border-left: 4px solid transparent;
+    background: var(--paper);
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
   }
-  .step:hover { background: rgba(240, 239, 236, 0.45); }
+  .step:hover { background: #FBFAF6; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
   .step.done { border-left-color: var(--live); }
   .step.running { border-left-color: var(--muted); }
+  .step.need { border-left-color: var(--warn); }
+  #stepPipeline {
+    border-left-color: var(--hazard);
+    background: linear-gradient(180deg, rgba(142, 47, 40, 0.04), rgba(255, 255, 252, 0));
+  }
+  #stepPipeline .step-title { color: var(--hazard); }
+  #stepPipeline .step-num {
+    color: var(--hazard);
+    border-color: rgba(142, 47, 40, 0.26);
+    background: #FFF8F5;
+  }
 
   .step-header {
-    display: flex;
-    align-items: baseline;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
     gap: 10px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
+    margin-bottom: 10px;
   }
   .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.2em;
+    height: 2.2em;
+    padding: 0 0.4em;
+    border: 1px solid var(--line);
+    background: var(--mist);
     font-family: var(--mono);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--muted);
-    min-width: 1.6em;
     letter-spacing: 0.04em;
   }
   .step-title {
     font-weight: 500;
-    font-size: 1.02rem;
+    font-size: var(--text-md);
     letter-spacing: -0.015em;
   }
   .step-info {
@@ -509,14 +623,14 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.15em;
-    height: 1.15em;
+    width: 1.4em;
+    height: 1.4em;
     padding: 0;
     margin: 0;
     border: 1px solid var(--line);
     background: transparent;
     color: var(--muted);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     font-family: var(--sans);
     line-height: 1;
@@ -544,25 +658,27 @@
     flex-direction: column;
     gap: 4px;
     position: absolute;
-    left: 0;
+    right: 0;
     top: calc(100% + 8px);
     z-index: 20;
     width: max-content;
-    max-width: min(22rem, 70vw);
+    max-width: min(24rem, calc(100vw - 48px));
     padding: 10px 12px;
     background: var(--paper);
     color: var(--ink);
     border: 1px solid var(--line);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 400;
-    line-height: 1.4;
+    line-height: 1.45;
     text-align: left;
     pointer-events: none;
     opacity: 0;
     visibility: hidden;
     transform: translateY(-2px);
+    transform-origin: top right;
     transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
     box-shadow: 0 8px 24px rgba(20, 20, 20, 0.08);
+    overflow-wrap: anywhere;
   }
   .step-tip > span { display: block; }
   .step-tip .tip-warn { color: var(--hazard); font-weight: 500; }
@@ -577,26 +693,37 @@
   }
   .step-callout {
     margin: 0 0 10px;
-    font-size: 0.86rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--ink);
   }
+  .step-callout.danger {
+    color: var(--hazard);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    margin-bottom: 12px;
+    background: rgba(142, 47, 40, 0.07);
+    border-left: 2px solid var(--hazard);
+  }
   .step-desc {
-    font-size: 0.86rem;
+    font-size: var(--text-sm);
     color: var(--muted);
-    margin: 0 0 10px;
+    margin: 0 0 12px;
     max-width: 48em;
+    line-height: 1.55;
   }
   .step-desc code {
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     color: var(--ink);
     background: var(--mist);
     padding: 1px 5px;
   }
   .step-status {
     margin: 0 0 10px;
-    font-size: 0.82rem;
+    font-size: var(--text-xs);
     color: var(--muted);
   }
   .step-status:empty { display: none; }
@@ -604,8 +731,6 @@
   .step-status.need { color: var(--warn); }
 
   /* Web 未运行：00、02–06 操作按钮不可点（复制命令仍可用） */
-  body.web-live #startWebBtn { display: none; }
-  body.web-live #webStartRunBtn { display: none; }
   body:not(.web-live) #openWebBtnStep { display: none !important; }
   body:not(.web-live) #stepInit .btn-row button,
   body:not(.web-live) #stepDedupe .btn-row button,
@@ -616,6 +741,45 @@
     opacity: 0.4;
     cursor: not-allowed;
     pointer-events: none;
+  }
+
+  .layout-shell {
+    display: grid;
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .sidebar-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: sticky;
+    top: 18px;
+    align-self: start;
+  }
+
+  .sidebar-stack > * {
+    margin-top: 0;
+  }
+
+  .main-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    min-width: 0;
+  }
+
+  .state-block,
+  .paths-panel,
+  .pipeline-section,
+  .output-shell {
+    background: var(--paper);
+    border: 1px solid var(--line);
+  }
+
+  .state-block {
+    padding: 16px;
   }
 
   #outputPanel {
@@ -641,33 +805,60 @@
     margin: 0 0 12px;
   }
   #outputPanel .output-meta {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--muted);
     margin-bottom: 8px;
-    font-family: var(--mono);
+    font-family: var(--sans);
   }
   #outputPanel pre {
-    background: var(--mist);
-    padding: 12px;
-    border-radius: 0;
     font-family: var(--mono);
-    font-size: 0.72rem;
-    overflow-x: auto;
-    max-height: 400px;
-    overflow-y: auto;
+    font-size: var(--text-xs);
     white-space: pre-wrap;
-    margin: 6px 0;
+    margin: 0;
     border: none;
   }
-  #outputPanel pre.stderr { box-shadow: inset 1px 0 0 var(--hazard); }
+  #outputPanel .output-body {
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--ink);
+  }
   #outputPanel .ok { color: var(--live); font-weight: 600; }
   #outputPanel .err { color: var(--hazard); font-weight: 600; }
+  .output-shell #outputPanel { display: block; }
+  .output-shell .output-head { margin-bottom: 14px; }
+  .output-shell .output-grid { margin-top: 12px; }
+  .output-empty {
+    display: block;
+    padding: 4px 0 0;
+    color: var(--muted);
+  }
+  .output-empty .empty-lead {
+    margin: 0 0 6px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .output-empty .empty-sub {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.55;
+  }
+  .output-shell #outputCmd,
+  .output-shell #outputStdout,
+  .output-shell #outputStderr {
+    background: transparent;
+  }
+  .output-shell #outputStdout,
+  .output-shell #outputStderr {
+    max-height: 320px;
+    overflow: auto;
+  }
 
   .footer-tip {
-    margin-top: 56px;
+    margin-top: 12px;
     padding-top: 18px;
     border-top: 1px solid var(--line);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     color: var(--muted);
   }
 
@@ -683,12 +874,21 @@
     .wrap { padding: 28px 18px 56px; }
     .masthead { grid-template-columns: 1fr; align-items: start; }
     .web-status { align-items: flex-start; }
-    .library-list { grid-template-columns: repeat(3, 1fr); }
+    .library-list { grid-template-columns: 1fr; }
     .metric { padding: 10px 8px 12px; }
-    .metric .k { font-size: 0.58rem; letter-spacing: 0.03em; }
+    .metric .k { font-size: var(--text-xs); letter-spacing: 0.02em; }
     .metric .v { font-size: 1.05rem; }
     .metric.wide { grid-column: 1 / -1; }
     .path-line { grid-template-columns: 1fr; gap: 2px; }
+  }
+
+  @media (max-width: 1040px) {
+    .layout-shell {
+      grid-template-columns: 1fr;
+    }
+    .sidebar-stack {
+      position: static;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -705,34 +905,39 @@
   <header class="masthead">
     <div>
       <h1 class="brand">PicVault</h1>
-      <p class="tagline">归档 · 加星 · 备份</p>
+      <p class="tagline">归档｜加星｜备份</p>
     </div>
     <div class="web-status">
       <div class="web-status-row">
         <span class="dot stopped" id="webDot"></span>
-        <span id="webStatus">Web · 检查中</span>
+        <span id="webStatus">Web：检查中</span>
       </div>
       <div class="btn-row">
-        <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开浏览</button>
+        <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
       </div>
     </div>
   </header>
 
-  <div class="alert page-in" id="webNotRunningCard">
-    <p class="alert-lead">请先启动 Web UI</p>
-    <p class="alert-sub">图库计数与运行按钮暂不可用；启动后约 5 秒内自动刷新。</p>
+  <div class="layout-shell">
+    <aside class="sidebar-stack" aria-label="状态与路径">
+
+  <div class="alert page-in panel" id="webNotRunningCard">
+    <p class="alert-lead">Web 未启动</p>
+    <p class="alert-sub">先启动 Web，再查看计数和运行按钮。启动后约 5 秒刷新。</p>
     <div class="btn-row" style="margin-top:0">
-      <button type="button" id="startWebBtn" class="primary" onclick="startWebUi(this)">启动</button>
-      <button type="button" onclick="copyText('startCmd')">复制</button>
+      <button type="button" class="primary" onclick="copyText('startCmd')">复制启动命令</button>
     </div>
     <details class="cmd-fold" style="margin-top:12px">
       <summary>启动命令</summary>
       <code class="cmd" id="startCmd"></code>
     </details>
-    <p id="startWebFeedback" hidden></p>
   </div>
 
-  <section class="library-section page-in" aria-label="图库计数">
+  <section class="library-section page-in panel" aria-label="图库计数">
+    <div class="section-head">
+      <p class="section-label">图库</p>
+      <p class="section-title">当前库概览</p>
+    </div>
     <div class="library-list" role="group" aria-label="各桶计数">
       <div class="metric">
         <span class="k">收件箱</span>
@@ -776,20 +981,20 @@
       </div>
     </div>
     <p class="hint" id="libraryWorkHint" hidden style="margin:10px 0 0;font-size:0.78rem;color:var(--muted);font-family:var(--mono);word-break:break-all;"></p>
-    <div class="alert warn" id="workMismatchCard">
-      <p>Dashboard 的 WORK 与当前 Web 绑定的工作盘不一致。图库计数与流水线步骤状态（含 00 是否已初始化）都来自 Web 的旧路径，不能当作新盘状态。请先停旧进程，再用新 WORK 启动；启动后约 5 秒内自动刷新。</p>
+    <div class="alert warn panel" id="workMismatchCard">
+      <p>Web 还绑着旧 WORK；这里的计数不是当前这块盘。先停旧 Web，再用新 WORK 重启。</p>
       <code class="cmd" id="webRebindCmd"></code>
       <div class="btn-row">
-        <button type="button" onclick="copyText('webRebindCmd')">复制重启命令</button>
+        <button type="button" onclick="copyText('webRebindCmd', this)">复制重启命令</button>
       </div>
     </div>
   </section>
 
-  <div class="alert warn" id="notInitializedCard">
-    <p>工作盘未初始化：缺少 by-date、_meta 等目录骨架。请先跑下方「00 初始化」；该步骤幂等，不会触碰 inbox 里已有文件。</p>
+  <div class="alert warn panel" id="notInitializedCard">
+    <p>工作盘还没初始化：缺少 by-date、_meta 等目录骨架。先跑 00，这一步幂等，不会碰 inbox 里已有文件。</p>
   </div>
 
-  <section class="section paths-panel page-in" id="pathsPanel" aria-label="路径配置">
+  <section class="section paths-panel page-in panel" id="pathsPanel" aria-label="路径配置">
     <div class="section-head">
       <p class="section-label">路径</p>
       <button type="button" class="ghost" id="pathsEditBtn" onclick="beginEditPaths()" style="display:none">编辑</button>
@@ -812,19 +1017,19 @@
     <form class="paths-form" id="pathsForm" onsubmit="return savePaths(event)">
       <div class="path-field">
         <label>PROJECT_ROOT</label>
-        <p class="hint">自动识别（本文件上级目录）</p>
+        <p class="hint">自动识别（仓库根目录）</p>
         <p class="path-auto" id="autoProjectRoot"></p>
-        <p class="hint warn" id="projectRootWarn" hidden>无法识别仓库根。请用 Finder / <code>open outputs/dashboard.html</code> 打开本页。</p>
+        <p class="hint warn" id="projectRootWarn" hidden>无法识别仓库根。请用 Finder 或 <code>open outputs/dashboard.html</code> 打开本页。</p>
       </div>
       <div class="path-field">
         <label for="inputWork">WORK</label>
-        <p class="hint">工作盘，例 /Volumes/Storage</p>
+        <p class="hint">工作盘，例如 /Volumes/Storage</p>
         <input id="inputWork" type="text" autocomplete="off" spellcheck="false"
                placeholder="/Volumes/Storage">
       </div>
       <div class="path-field">
         <label for="inputBackup">BACKUP</label>
-        <p class="hint">备份盘，例 /Volumes/WD4T/MediaVault</p>
+        <p class="hint">备份盘，例如 /Volumes/WD4T/MediaVault</p>
         <input id="inputBackup" type="text" autocomplete="off" spellcheck="false"
                placeholder="/Volumes/WD4T/MediaVault">
       </div>
@@ -835,11 +1040,15 @@
     </form>
   </section>
 
-  <section class="section pipeline-section" aria-label="流水线">
+    </aside>
+
+    <main class="main-stack">
+
+  <section class="section pipeline-section page-in panel" aria-label="流水线">
     <div class="pipeline-head">
       <p class="section-label">流水线</p>
-      <p class="section-title">按顺序做 · 先浏览再同步</p>
-      <p class="pipeline-progress" id="pipelineProgress">进度：检测中...</p>
+      <p class="section-title">按顺序做｜先浏览再同步</p>
+      <p class="pipeline-progress" id="pipelineProgress">进度：检测中…</p>
     </div>
 
     <div class="steps">
@@ -848,15 +1057,18 @@
         <div class="step-header">
           <span class="step-num">00</span>
           <span class="step-title">初始化工作盘</span>
-          <button type="button" class="step-info" aria-label="建 by-date / _meta 等骨架。重复执行也安全。">
+      <button type="button" class="step-info" aria-label="创建 by-date、_meta、thumbs 等目录骨架。重复执行也安全。">
             i
             <span class="step-tip" role="tooltip">
-              <span>建 by-date / _meta 等骨架</span>
+              <span>创建 by-date、_meta、thumbs 等目录骨架</span>
+              <span>不会碰 inbox 里的文件</span>
               <span>重复执行也安全</span>
             </span>
           </button>
         </div>
-        <p class="step-status" id="initStatusLine">状态：检测中...</p>
+        <p class="step-callout">先建目录骨架。</p>
+        <p class="step-desc">只建 by-date、_meta、thumbs 等目录，不会动 inbox 里的文件。第一次使用先跑 00。</p>
+        <p class="step-status" id="initStatusLine">状态：检测中…</p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
         <div class="cmd-row">
@@ -865,7 +1077,7 @@
         </div>
         </details>
         <div class="btn-row">
-          <button id="initRunBtn" onclick="runInit(this)">运行初始化</button>
+          <button id="initRunBtn" onclick="runInit(this)">执行初始化</button>
         </div>
       </div>
 
@@ -873,31 +1085,34 @@
         <div class="step-header">
           <span class="step-num">01</span>
           <span class="step-title">导入到 inbox</span>
-          <button type="button" class="step-info" aria-label="把照片/视频拖进工作盘 inbox/，可含子文件夹。本步不用跑命令。">
+          <button type="button" class="step-info" aria-label="把照片和视频先拖进 inbox，可带子文件夹。这一步不用跑命令。">
             i
             <span class="step-tip" role="tooltip">
-              <span>把照片/视频拖进工作盘 inbox/</span>
+              <span>把照片和视频先拖进 inbox</span>
               <span>可含子文件夹</span>
-              <span>本步不用跑命令</span>
+              <span>这一步不用跑命令</span>
             </span>
           </button>
         </div>
-        <p class="step-desc">手动拖到 <code id="inboxPath"></code>，可包含子文件夹</p>
+        <p class="step-callout">把素材先放进 inbox。</p>
+        <p class="step-desc">把照片、视频从 Finder 拖到 <code id="inboxPath"></code>，可以直接带子文件夹。</p>
       </div>
 
       <div class="step" id="stepDedupe">
         <div class="step-header">
           <span class="step-num">02</span>
           <span class="step-title">去重</span>
-          <button type="button" class="step-info" aria-label="按内容找完全相同的文件；相同内容只留最大的一份；其余进 _trash/（可找回）。">
+          <button type="button" class="step-info" aria-label="按文件内容找完全重复的文件；保留体积最大的一份，其余移到 _trash/，可找回。">
             i
             <span class="step-tip" role="tooltip">
-              <span>按内容找完全相同的文件</span>
-              <span>相同内容只留最大的一份</span>
-              <span>其余进 _trash/（可找回）</span>
+              <span>按文件内容找完全重复的文件</span>
+              <span>保留体积最大的一份</span>
+              <span>其余移到 _trash/，可找回</span>
             </span>
           </button>
         </div>
+        <p class="step-callout">先试跑，确认重复项。</p>
+        <p class="step-desc">按文件内容找完全重复的文件；每组只保留体积最大的一份，其余移到 <code>_trash/</code>，可找回。</p>
         <p class="step-status" id="dedupeStepStatus"></p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -907,26 +1122,27 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'dedupe_dry')">预演</button>
-          <button class="danger" onclick="runApply(this, 'dedupe_apply', '确定执行去重？\n\n• 找出 inbox 里内容完全相同的文件\n• 相同内容的文件只留体积最大的一份\n• 其余移到 _trash/（可找回，不是永久删除）')">执行</button>
+          <button onclick="runCommand(this, 'dedupe_dry')">试跑</button>
+          <button class="danger" onclick="runApply(this, 'dedupe_apply', '确认执行去重？\n\n• 先找出 inbox 里内容完全相同的文件\n• 每组只保留体积最大的一份\n• 其余移到 _trash/，可以找回')">执行去重</button>
         </div>
       </div>
 
       <div class="step" id="stepRename">
         <div class="step-header">
           <span class="step-num">03</span>
-          <span class="step-title">重命名加归档</span>
-          <button type="button" class="step-info" aria-label="按拍摄时间重命名；照片/视频进 by-date/；截图进 screenshots/，录屏进 screenrecords/；从 inbox 搬走。主题请到 /themes 按主题同步。">
+          <span class="step-title">重命名并归档</span>
+          <button type="button" class="step-info" aria-label="按拍摄时间重命名；照片和视频进 by-date/；截图进 screenshots/，录屏进 screenrecords/；文件会从 inbox 搬走，不是复制。">
             i
             <span class="step-tip" role="tooltip">
               <span>按拍摄时间重命名</span>
-              <span>照片/视频进 by-date/</span>
+              <span>照片和视频进 by-date/</span>
               <span>截图进 screenshots/，录屏进 screenrecords/</span>
-              <span>从 inbox 搬走（不是复制）</span>
-              <span>主题请到 /themes 按主题同步（不自动全量）</span>
+              <span>文件会从 inbox 搬走，不是复制</span>
             </span>
           </button>
         </div>
+        <p class="step-callout">按拍摄时间整理。</p>
+        <p class="step-desc">按拍摄时间重命名。照片、视频进 <code>by-date/</code>，截图进 <code>screenshots/</code>，录屏进 <code>screenrecords/</code>；文件会从 <code>inbox/</code> 搬走。</p>
         <p class="step-status" id="renameStepStatus"></p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -936,8 +1152,8 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'rename_dry')">预演</button>
-          <button class="danger" onclick="runApply(this, 'rename_apply', '确定整理归档？\n\n• 按拍摄时间重命名 inbox 里的文件\n• 照片/视频移入 by-date/，截图→screenshots/，录屏→screenrecords/\n• 会从 inbox 搬走文件（不是复制）\n• 不会自动同步主题；请到 /themes 按主题同步')">执行</button>
+          <button onclick="runCommand(this, 'rename_dry')">试跑</button>
+          <button class="danger" onclick="runApply(this, 'rename_apply', '确认整理归档？\n\n• 按拍摄时间重命名 inbox 里的文件\n• 照片和视频进入 by-date/\n• 截图进入 screenshots/\n• 录屏进入 screenrecords/\n• 文件会从 inbox 搬走，不是复制')">执行归档</button>
         </div>
       </div>
 
@@ -945,27 +1161,21 @@
         <div class="step-header">
           <span class="step-num">04</span>
           <span class="step-title">浏览加星</span>
-          <button type="button" class="step-info has-warn" aria-label="打开 Web 核对归档；加星、纠错后再同步。先整理再同步备份盘。">
+          <button type="button" class="step-info has-warn" aria-label="先打开 Web 看归档结果，加星和纠错后再同步。">
             i
             <span class="step-tip" role="tooltip">
-              <span>打开 Web 核对归档</span>
+              <span>先打开 Web 看归档结果</span>
               <span>加星、纠错后再同步</span>
-              <span class="tip-warn">先整理再同步备份盘</span>
+              <span class="tip-warn">先整理，再去 05</span>
             </span>
           </button>
         </div>
+        <p class="step-callout">先看一遍，再决定要不要同步。</p>
+        <p class="step-desc">打开本地 Web 核对结果，顺手加星、纠错；确认没问题后再去 05。</p>
         <p class="step-status" id="webStepStatus"></p>
-        <details class="cmd-fold">
-          <summary>查看命令</summary>
-        <div class="cmd-row">
-          <code class="cmd" id="webStartCmd"></code>
-          <button type="button" class="cmd-copy" onclick="copyText('webStartCmd', this)">复制</button>
-        </div>
-        </details>
         <div class="btn-row">
-          <button type="button" id="webStartRunBtn" class="primary" onclick="startWebUi(this)">启动</button>
           <button class="danger" onclick="runCommand(this, 'web_stop')">停止</button>
-          <button id="openWebBtnStep" class="primary" style="display:none" onclick="openWeb()">打开浏览</button>
+          <button id="openWebBtnStep" class="primary" style="display:none" onclick="openWeb()">打开图库</button>
         </div>
       </div>
 
@@ -973,15 +1183,17 @@
         <div class="step-header">
           <span class="step-num">05</span>
           <span class="step-title">同步到备份盘</span>
-          <button type="button" class="step-info" aria-label="rsync 镜像到备份盘；默认只增不删；可重复跑，只补新增/更新。">
+          <button type="button" class="step-info" aria-label="把工作盘镜像到备份盘；默认只增不删；可重复执行。">
             i
             <span class="step-tip" role="tooltip">
-              <span>rsync 镜像到备份盘</span>
+              <span>把工作盘镜像到备份盘</span>
               <span>默认只增不删</span>
-              <span>可重复跑，只补新增/更新</span>
+              <span>可重复执行，只补新增和更新</span>
             </span>
           </button>
         </div>
+        <p class="step-callout">把工作盘镜像到备份盘。</p>
+        <p class="step-desc">默认只新增、不删除现有文件；重复跑也可以，先确认 WORK 和 BACKUP 都已挂载。</p>
         <p class="step-status" id="syncStepStatus"></p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -991,8 +1203,8 @@
         </div>
         </details>
         <div class="btn-row">
-          <button onclick="runCommand(this, 'sync_verify')">预演</button>
-          <button class="danger" onclick="runApply(this, 'sync_apply', '确定同步到备份盘？\n\n• 建议已完成第 4 步：浏览核对、加星、纠错、回收站\n• 把工作盘的 by-date / screenshots / screenrecords / docs / things / 收藏 / vlog 镜像到备份盘\n• 默认只新增、不删除备份盘已有文件\n• 可能耗时较长，请保持两块盘都已挂载')">执行</button>
+          <button onclick="runCommand(this, 'sync_verify')">试跑</button>
+          <button class="danger" onclick="runApply(this, 'sync_apply', '确认同步到备份盘？\n\n• 建议先完成第 4 步：浏览、加星、纠错\n• 把工作盘的 by-date、screenshots、screenrecords、docs、things、_favorite、_vlogs 镜像到备份盘\n• 默认只新增、不删除备份盘已有文件\n• 可能会跑一会儿，请先确认两块盘都已挂载')">执行同步</button>
         </div>
       </div>
 
@@ -1000,15 +1212,17 @@
         <div class="step-header">
           <span class="step-num">06</span>
           <span class="step-title">一键全流程</span>
-          <button type="button" class="step-info has-warn" aria-label="依次：去重 → 归档 → 同步；不熟时建议先分步跑 02 / 03 / 05。一步到位，不可回滚。">
+          <button type="button" class="step-info has-warn" aria-label="一次跑完去重、归档、同步；不熟先分步跑 02、03、05。">
             i
             <span class="step-tip" role="tooltip">
-              <span>依次：去重 → 归档 → 同步</span>
-              <span>不熟时建议先分步跑 02 / 03 / 05</span>
-              <span class="tip-warn">一步到位，不可回滚</span>
+              <span>一次跑完去重 → 归档 → 同步</span>
+              <span>不熟就先单独跑 02、03、05</span>
+              <span class="tip-warn">一步到位，不能分段回退</span>
             </span>
           </button>
         </div>
+        <p class="step-callout danger">一次跑完 02、03、05；不确定就别点。</p>
+        <p class="step-desc">这一步会连续执行去重、归档、同步；适合已经熟悉流程时用，不确定就分开跑。</p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
         <div class="cmd-row">
@@ -1017,40 +1231,70 @@
         </div>
         </details>
         <div class="btn-row">
-          <button class="danger" onclick="runApply(this, 'pipeline', '确定一键跑完全流程？\n\n将依次执行：去重 → 整理归档 → 同步备份。\n会移动大量文件且不能分段回滚；建议先单独跑过 02 / 03 / 05（浏览整理放在同步前）。')">运行全流程</button>
+          <button class="danger" onclick="runApply(this, 'pipeline', '确定一键跑完全流程？\n\n将依次执行：去重 → 整理归档 → 同步备份。\n会移动大量文件且不能分段回滚；建议先单独跑过 02、03、05（浏览整理放在同步前）。')">一键跑完</button>
         </div>
       </div>
 
     </div>
   </section>
 
-  <section class="section" aria-label="最近输出">
+  <section class="section output-shell page-in panel" aria-label="最近输出">
     <div class="section-head">
       <p class="section-label">输出</p>
     </div>
     <div id="outputPanel">
       <div class="output-head">
-        <h2>最近输出</h2>
+        <h2>运行面板</h2>
         <div class="btn-row" style="margin:0">
           <button type="button" class="danger" id="cancelRunBtn" onclick="cancelActiveRun()" style="display:none">打断</button>
-          <button type="button" class="ghost" onclick="resumeOrShowLatestRun()">回看最近</button>
+          <button type="button" class="ghost" onclick="resumeOrShowLatestRun()">回看最近一次</button>
         </div>
       </div>
-      <div class="output-meta" id="outputMeta"></div>
-      <pre id="outputCmd"></pre>
-      <div id="outputStatus"></div>
-      <pre id="outputStdout"></pre>
-      <pre id="outputStderr" class="stderr"></pre>
+      <div class="output-empty" id="outputEmptyState">
+        <p class="empty-lead">还没有运行记录</p>
+        <p class="empty-sub">先试跑或执行任一步；命令、进度、标准输出、错误输出都会回到这里，便于 Mac 上长任务回看。</p>
+      </div>
+      <div class="output-grid" id="outputGrid" style="display:none">
+        <section class="output-card output-wide">
+          <div class="output-card-head">
+            <p class="output-label">命令</p>
+          </div>
+          <pre id="outputCmd"></pre>
+        </section>
+        <section class="output-card tone-live">
+          <p class="output-label">进度</p>
+          <div class="output-body" id="outputMeta"></div>
+        </section>
+        <section class="output-card">
+          <p class="output-label">状态</p>
+          <div class="output-body" id="outputStatus"></div>
+        </section>
+        <section class="output-card output-wide tone-live" id="outputStdoutCard" style="display:none">
+          <div class="output-card-head">
+            <p class="output-label">标准输出</p>
+          </div>
+          <pre id="outputStdout"></pre>
+        </section>
+        <section class="output-card output-wide tone-hazard" id="outputStderrCard" style="display:none">
+          <div class="output-card-head">
+            <p class="output-label">错误输出</p>
+          </div>
+          <pre id="outputStderr" class="stderr"></pre>
+        </section>
+      </div>
     </div>
   </section>
 
-  <p class="footer-tip">会改文件的操作会先确认 · 建议先 Dry-run</p>
+  <p class="footer-tip">会改文件的操作会先确认｜先试跑，再执行</p>
+
+    </main>
+  </div>
 
 </div>
 
 <script>
 // WORK / BACKUP placeholders — entered in the Paths form, stored in localStorage.
-// PROJECT_ROOT is auto-detected from this file's location (.../outputs/dashboard.html → repo root).
+// PROJECT_ROOT is auto-detected from this file's location (repo/outputs/dashboard.html → repo root).
 const PROJECT_ROOT_PLACEHOLDER = '/path/to/picvault';
 const WORK_PLACEHOLDER         = '/Volumes/WORK_DISK';
 const BACKUP_PLACEHOLDER       = '/Volumes/BACKUP_DISK';
@@ -1073,6 +1317,14 @@ function setCancelRunVisible(on) {
   const btn = document.getElementById('cancelRunBtn');
   if (btn) btn.style.display = on ? 'inline-block' : 'none';
 }
+
+function setOutputHasData(hasData) {
+  const empty = document.getElementById('outputEmptyState');
+  const grid = document.getElementById('outputGrid');
+  if (empty) empty.style.display = hasData ? 'none' : 'block';
+  if (grid) grid.style.display = hasData ? 'grid' : 'none';
+}
+
 async function cancelActiveRun() {
   const btn = document.getElementById('cancelRunBtn');
   if (btn) btn.disabled = true;
@@ -1085,7 +1337,7 @@ async function cancelActiveRun() {
     const data = await r.json();
     const statusEl = document.getElementById('outputStatus');
     if (data && data.ok) {
-      if (statusEl) statusEl.innerHTML = '<span class="err">正在打断...</span>';
+      if (statusEl) statusEl.innerHTML = '<span class="err">正在打断…</span>';
     } else {
       if (statusEl) {
         statusEl.innerHTML = '<span class="err">' +
@@ -1112,15 +1364,14 @@ const PLACEHOLDER_FRAGMENTS = [
 ];
 
 const CMD_IDS = {
-  init: 'initCmd',
-  inboxPath: 'inboxPath',
-  dedupeDry: 'dedupeDryCmd',
-  renameDry: 'renameDryCmd',
-  syncVerify: 'syncVerifyCmd',
-  webStart: 'webStartCmd',
-  pipeline: 'pipelineCmd',
-  startWebTerminal: 'startCmd',
-};
+    start: 'startCmd',
+    init: 'initCmd',
+    inboxPath: 'inboxPath',
+    dedupeDry: 'dedupeDryCmd',
+    renameDry: 'renameDryCmd',
+    syncVerify: 'syncVerifyCmd',
+    pipeline: 'pipelineCmd',
+  };
 
 let paths = {
   projectRoot: PROJECT_ROOT_PLACEHOLDER,
@@ -1130,11 +1381,11 @@ let paths = {
 let PICVAULT = '';
 let CMDS = {};
 
-/** Resolve repo root from .../outputs/dashboard.html (file:// or http with that path). */
+/** Resolve repo root from repo/outputs/dashboard.html (file:// or http with that path). */
 function detectProjectRoot() {
   try {
     let path = decodeURIComponent(location.pathname || '');
-    // Windows file:// sometimes yields /C:/...
+    // Windows file:// sometimes yields /C:/path.
     if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
     const m = path.match(/^(.*)\/outputs\/dashboard\.html$/i);
     if (m && m[1]) return m[1];
@@ -1157,14 +1408,13 @@ function buildCmds(p) {
   return {
     PICVAULT: picvault,
     CMDS: {
+      start:           workEnv + picvault + ' web start',
       init:            workEnv + picvault + ' init',
       inboxPath:       p.work + '/inbox',
       dedupeDry:       p.projectRoot + '/scripts/dedupe.py --work ' + p.work + ' --dry-run',
       renameDry:       p.projectRoot + '/scripts/rename_organize.py --work ' + p.work + ' --dry-run',
       syncVerify:      p.projectRoot + '/scripts/sync_to_backup.sh --work ' + p.work + ' --backup ' + p.backup + ' --verify --dry-run',
-      webStart:        workEnv + picvault + ' web start',
       pipeline:        workEnv + backupEnv + picvault + ' pipeline --yes',
-      startWebTerminal: workEnv + picvault + ' web start',
     },
   };
 }
@@ -1248,7 +1498,7 @@ function fillPathInputs(p) {
 function updatePathsSummary() {
   const root = paths.projectRoot;
   const sumRoot = document.getElementById('sumProjectRoot');
-  sumRoot.textContent = 'PROJECT_ROOT · ' + root + (detectProjectRoot() ? '（自动）' : '');
+  sumRoot.textContent = 'PROJECT_ROOT：' + root + (detectProjectRoot() ? '（自动）' : '');
   document.getElementById('sumWork').textContent = paths.work;
   document.getElementById('sumBackup').textContent = paths.backup;
   document.body.classList.toggle('paths-ready', isConfigured(paths));
@@ -1499,17 +1749,22 @@ function openOutputForRun(run, statusHtml) {
   const statusEl = document.getElementById('outputStatus');
   const stdoutEl = document.getElementById('outputStdout');
   const stderrEl = document.getElementById('outputStderr');
+  const stdoutCard = document.getElementById('outputStdoutCard');
+  const stderrCard = document.getElementById('outputStderrCard');
 
   const wasHidden = getComputedStyle(panel).display === 'none';
-  meta.textContent = (run.started_at || new Date().toLocaleTimeString()) +
-    (run.id ? ' · ' + run.id : '');
+  setOutputHasData(true);
+  meta.textContent = '开始：' + (formatApplyClock(run.started_at) || run.started_at || new Date().toLocaleTimeString()) +
+    (run.id ? '｜' + run.id : '');
   cmdEl.textContent = '$ ' + (run.command || run.command_name || '');
   cmdEl.style.display = 'block';
   statusEl.innerHTML = statusHtml;
   stdoutEl.textContent = '';
   stdoutEl.style.display = 'none';
+  if (stdoutCard) stdoutCard.style.display = 'none';
   stderrEl.textContent = '';
   stderrEl.style.display = 'none';
+  if (stderrCard) stderrCard.style.display = 'none';
   panel.style.display = 'block';
   if (wasHidden) panel.scrollIntoView({ behavior: 'smooth' });
 }
@@ -1535,7 +1790,7 @@ async function resumeOrShowLatestRun(opts) {
     if (onlyRunning) return;
 
     // Finished runs: do not dump full logs into the DOM (large dedupe logs freeze UI).
-    openOutputForRun(run, '<span class="ok">加载中...</span>');
+    openOutputForRun(run, '<span class="ok">加载中…</span>');
     stopLogPoll();
     currentRunId = run.id;
     logPartialLine = '';
@@ -1558,10 +1813,10 @@ async function resumeOrShowLatestRun(opts) {
   }
 }
 
-async function runCommand(btn, cmdName) {
+  async function runCommand(btn, cmdName) {
   if (btn.disabled) return;
   const needsWeb = ['init', 'dedupe_dry', 'dedupe_apply', 'rename_dry', 'rename_apply',
-    'web_start', 'web_stop', 'sync_verify', 'sync_apply', 'pipeline'].includes(cmdName);
+    'web_stop', 'sync_verify', 'sync_apply', 'pipeline'].includes(cmdName);
   if (needsWeb && !document.body.classList.contains('web-live')) {
     alert('请先启动或重启 Web UI');
     return;
@@ -1576,7 +1831,7 @@ async function runCommand(btn, cmdName) {
   }
   btn.disabled = true;
   const orig = btn.textContent;
-  btn.textContent = '运行中...';
+  btn.textContent = '运行中…';
   stopLogPoll();
   beginLiveOutput(cmdName);
   try {
@@ -1597,7 +1852,7 @@ async function runCommand(btn, cmdName) {
       if (!data.ok && data.error === '已有任务在运行') {
         const active = data.active;
         const tip = document.getElementById('outputStatus');
-        tip.innerHTML = '<span class="err">已有任务在运行</span> — 正在回看该任务';
+        tip.innerHTML = '<span class="err">已有任务在运行</span>：正在回看该任务';
         setCancelRunVisible(true);
         if (active && active.id) {
           openOutputForRun(active, '<span class="ok">运行中（回看）</span>');
@@ -1651,7 +1906,7 @@ function updateLibraryWorkHint(apiWork, mismatch) {
   // Only surface when Web WORK disagrees with Dashboard — otherwise path lives in 路径.
   if (mismatch && apiWork) {
     el.hidden = false;
-    el.textContent = 'Web 绑定（旧）：' + apiWork + '  ·  Dashboard WORK：' + paths.work;
+    el.textContent = 'Web 绑定（旧）：' + apiWork + '｜Dashboard WORK：' + paths.work;
   } else {
     el.hidden = true;
     el.textContent = '';
@@ -1687,21 +1942,27 @@ function updateInitStatus(initialized) {
   } else {
     lastInitialized = initialized;
   }
+  const stepEl = document.getElementById('stepInit');
   const el = document.getElementById('initStatusLine');
   if (!el) return;
   el.classList.remove('ok', 'need');
+  if (stepEl) stepEl.classList.remove('done', 'running', 'need');
   if (initialized === true) {
     el.textContent = '状态：已初始化。可跳过本步；再跑也安全（幂等）。';
     el.classList.add('ok');
+    if (stepEl) stepEl.classList.add('done');
   } else if (initialized === false) {
     el.textContent = '状态：未初始化。请先运行 init。';
     el.classList.add('need');
+    if (stepEl) stepEl.classList.add('need');
   } else if (initialized === 'stale') {
     el.textContent = '状态：当前 Web UI 过旧，无法检测。请先停止再启动 Web，然后刷新本页。';
     el.classList.add('need');
+    if (stepEl) stepEl.classList.add('need');
   } else if (initialized === 'mismatch') {
-    el.textContent = '状态：不可信 — Web 仍绑旧 WORK，请先按图库上方提示重启 Web（勿把旧盘「已初始化」当成新盘）。';
+    el.textContent = '状态：不可信：Web 仍绑旧 WORK，请先按图库上方提示重启 Web（勿把旧盘「已初始化」当成新盘）。';
     el.classList.add('need');
+    if (stepEl) stepEl.classList.add('need');
   } else {
     el.textContent = '请先启动或重启 Web UI';
   }
@@ -1726,7 +1987,7 @@ function updateWebStepMarker() {
   const statusEl = document.getElementById('webStepStatus');
   if (stepEl) {
     if (webLive) stepEl.classList.add('done');
-    else stepEl.classList.remove('done');
+    else stepEl.classList.remove('done', 'running');
   }
   if (statusEl) {
     statusEl.classList.remove('ok', 'need');
@@ -1744,7 +2005,7 @@ function updatePipelineMarkers(pipeline) {
   const progressEl = document.getElementById('pipelineProgress');
   const webOverview = updateWebStepMarker();
   if (!pipeline || typeof pipeline !== 'object') {
-    if (progressEl) progressEl.textContent = '进度：' + webOverview + ' · 02/03/05 无法检测';
+    if (progressEl) progressEl.textContent = '进度：' + webOverview + '｜02、03、05 无法检测';
     for (const s of PIPELINE_STEPS) {
       const statusEl = document.getElementById(s.statusId);
       const stepEl = document.getElementById(s.stepId);
@@ -1779,18 +2040,18 @@ function updatePipelineMarkers(pipeline) {
       const clock = formatApplyClock(m.finished_at);
       if (statusEl) {
         statusEl.textContent = clock
-          ? ('已完成 · Apply 于 ' + clock)
+          ? ('已完成，完成于 ' + clock)
           : '已完成';
         statusEl.classList.add('ok');
       }
       if (stepEl) stepEl.classList.add('done');
     } else {
       label = '未执行';
-      if (statusEl) statusEl.textContent = '尚未 Apply';
+      if (statusEl) statusEl.textContent = '尚未执行';
     }
     overview.push(s.num + ' ' + label);
   }
-  if (progressEl) progressEl.textContent = '进度：' + overview.join(' · ');
+  if (progressEl) progressEl.textContent = '进度：' + overview.join('｜');
 }
 
 function beginLiveOutput(cmdName) {
@@ -1800,16 +2061,21 @@ function beginLiveOutput(cmdName) {
   const statusEl = document.getElementById('outputStatus');
   const stdoutEl = document.getElementById('outputStdout');
   const stderrEl = document.getElementById('outputStderr');
+  const stdoutCard = document.getElementById('outputStdoutCard');
+  const stderrCard = document.getElementById('outputStderrCard');
 
   const wasHidden = getComputedStyle(panel).display === 'none';
-  meta.textContent = new Date().toLocaleTimeString();
+  setOutputHasData(true);
+  meta.textContent = '运行中：' + new Date().toLocaleTimeString();
   cmdEl.textContent = '$ ' + cmdName;
   cmdEl.style.display = 'block';
-  statusEl.innerHTML = '<span class="ok">运行中...</span>';
+  statusEl.innerHTML = '<span class="ok">运行中…</span>';
   stdoutEl.textContent = '';
   stdoutEl.style.display = 'none';
+  if (stdoutCard) stdoutCard.style.display = 'none';
   stderrEl.textContent = '';
   stderrEl.style.display = 'none';
+  if (stderrCard) stderrCard.style.display = 'none';
   setCancelRunVisible(true);
   panel.style.display = 'block';
   if (wasHidden) panel.scrollIntoView({behavior: 'smooth'});
@@ -1818,7 +2084,10 @@ function beginLiveOutput(cmdName) {
 function appendLiveLine(stream, line) {
   const el = document.getElementById(stream === 'stderr' ? 'outputStderr' : 'outputStdout');
   if (!el) return;
+  const card = el.closest('.output-card');
+  setOutputHasData(true);
   if (el.style.display === 'none') el.style.display = 'block';
+  if (card) card.style.display = 'flex';
   el.textContent += (el.textContent ? '\n' : '') + line;
   const lines = el.textContent.split('\n');
   if (lines.length > MAX_LIVE_LINES) {
@@ -1834,13 +2103,14 @@ function finishLiveOutput(data) {
   const cmdEl = document.getElementById('outputCmd');
   const ts = new Date().toLocaleTimeString();
   setCancelRunVisible(false);
-  meta.textContent = ts + (data.rc !== undefined && data.rc !== null ? ' · rc=' + data.rc : '');
+  setOutputHasData(true);
+  meta.textContent = '完成：' + ts + (data.rc !== undefined && data.rc !== null ? '｜退出码：' + data.rc : '');
   if (data.command) {
     cmdEl.textContent = '$ ' + data.command;
     cmdEl.style.display = 'block';
   }
   if (data.ok) {
-    statusEl.innerHTML = '<span class="ok">成功</span>';
+    statusEl.innerHTML = '<span class="ok">已完成</span>';
   } else {
     statusEl.innerHTML = '<span class="err">' + escapeHtml(data.error || '失败') + '</span>';
   }
@@ -1914,24 +2184,29 @@ function showOutput(data) {
   const statusEl = document.getElementById('outputStatus');
   const stdoutEl = document.getElementById('outputStdout');
   const stderrEl = document.getElementById('outputStderr');
+  const stdoutCard = document.getElementById('outputStdoutCard');
+  const stderrCard = document.getElementById('outputStderrCard');
 
   setCancelRunVisible(false);
+  setOutputHasData(true);
   const wasHidden = getComputedStyle(panel).display === 'none';
   const ts = new Date().toLocaleTimeString();
-  meta.textContent = ts + (data.rc !== undefined ? ' · rc=' + data.rc : '');
+  meta.textContent = '最近一次：' + ts + (data.rc !== undefined ? '｜退出码：' + data.rc : '');
   cmdEl.textContent = '$ ' + (data.command || '');
   cmdEl.style.display = data.command ? 'block' : 'none';
 
   if (data.ok) {
-    statusEl.innerHTML = '<span class="ok">成功</span>';
+    statusEl.innerHTML = '<span class="ok">已完成</span>';
   } else {
     statusEl.innerHTML = '<span class="err">' + escapeHtml(data.error || '失败') + '</span>';
   }
 
   stdoutEl.textContent = data.stdout || '';
   stdoutEl.style.display = data.stdout ? 'block' : 'none';
+  if (stdoutCard) stdoutCard.style.display = data.stdout ? 'flex' : 'none';
   stderrEl.textContent = data.stderr || '';
   stderrEl.style.display = data.stderr ? 'block' : 'none';
+  if (stderrCard) stderrCard.style.display = data.stderr ? 'flex' : 'none';
 
   panel.style.display = 'block';
   if (wasHidden) panel.scrollIntoView({behavior: 'smooth'});
@@ -1956,14 +2231,12 @@ async function pollStatus() {
 
       document.getElementById('webDot').className = 'dot running';
       document.getElementById('webStatus').textContent = mismatch
-        ? 'Web · 运行中（旧 WORK）'
-        : 'Web · 运行中';
+        ? 'Web：运行中（旧 WORK）'
+        : 'Web：运行中';
       const openStep = document.getElementById('openWebBtnStep');
       if (openStep) openStep.style.display = 'inline-block';
       document.getElementById('webNotRunningCard').classList.remove('visible');
       document.body.classList.add('web-live');
-      setStartWebFeedback('', null);
-
       updateLibraryWorkHint(apiWork, mismatch);
       setWorkMismatch(mismatch, apiWork);
 
@@ -1983,7 +2256,7 @@ async function pollStatus() {
         }
         const progressEl = document.getElementById('pipelineProgress');
         if (progressEl) {
-          progressEl.textContent = '进度：状态来自旧 WORK，不可信 — 请先按图库上方提示重启 Web';
+          progressEl.textContent = '进度：状态来自旧 WORK，不可信：请先按图库上方提示重启 Web';
         }
         syncAlertPriority();
         return;
@@ -1998,7 +2271,7 @@ async function pollStatus() {
       setMetricValue('vlogs', d.vlogs);
       setMetricValue('trash', d.trash);
       setMetricValue('starred', d.starred);
-      setMetricValue('lastSync', d.last_sync || '', !d.last_sync);
+      setMetricValue('lastSync', d.last_sync || '未同步', false);
       if (d.initialized === false) {
         notInitCard.classList.add('visible');
         updateInitStatus(false);
@@ -2017,7 +2290,7 @@ async function pollStatus() {
     }
   } catch (e) {
     document.getElementById('webDot').className = 'dot stopped';
-    document.getElementById('webStatus').textContent = 'Web · 未运行';
+    document.getElementById('webStatus').textContent = 'Web：未运行';
     const openStep = document.getElementById('openWebBtnStep');
     if (openStep) openStep.style.display = 'none';
     document.getElementById('webNotRunningCard').classList.add('visible');
@@ -2032,116 +2305,6 @@ async function pollStatus() {
   }
 }
 
-
-const BOOT_PORT = 8764;
-const BOOT_URL = 'http://127.0.0.1:8764/api/web/start';
-const BOOT_HEALTH_URL = 'http://127.0.0.1:8764/api/health';
-
-function setStartWebFeedback(msg, cls) {
-  const el = document.getElementById('startWebFeedback');
-  if (!el) return;
-  if (!msg) {
-    el.hidden = true;
-    el.textContent = '';
-    el.className = '';
-    return;
-  }
-  el.hidden = false;
-  el.textContent = msg;
-  el.className = cls ? cls : '';
-}
-
-async function waitForWebLive(ms) {
-  const deadline = Date.now() + (ms || 15000);
-  while (Date.now() < deadline) {
-    try {
-      const r = await fetch(API_URL, { cache: 'no-store' });
-      if (r.ok) return true;
-    } catch (e) { /* retry */ }
-    await new Promise(function (res) { setTimeout(res, 500); });
-  }
-  return false;
-}
-
-async function startWebUi(btn) {
-  if (btn && btn.disabled) return;
-  if (!isConfigured(paths)) {
-    revealPathsForSetup();
-    alert('请先保存 WORK / BACKUP（PROJECT_ROOT 自动识别），再启动 Web UI。');
-    return;
-  }
-
-  const buttons = [
-    document.getElementById('startWebBtn'),
-    document.getElementById('webStartRunBtn'),
-  ].filter(Boolean);
-  const originals = buttons.map(function (b) { return b.textContent; });
-  buttons.forEach(function (b) {
-    b.disabled = true;
-    b.textContent = '启动中…';
-  });
-  setStartWebFeedback('正在通过本地 boot 助手启动…', null);
-
-  const bootCmd = 'WORK=' + shellSingleQuote(paths.work) + ' ' +
-    paths.projectRoot + '/picvault boot start';
-
-  try {
-    let healthOk = false;
-    try {
-      const h = await fetch(BOOT_HEALTH_URL, { cache: 'no-store' });
-      healthOk = h.ok;
-    } catch (e) {
-      healthOk = false;
-    }
-    if (!healthOk) {
-      setStartWebFeedback(
-        '启动助手未运行。请先在终端执行：' + bootCmd +
-        '（之后可一键启动；也可点「复制」粘贴 web start）',
-        'err'
-      );
-      return;
-    }
-
-    const r = await fetch(BOOT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ work: paths.work, port: WEB_PORT }),
-    });
-    let data = {};
-    try {
-      data = await r.json();
-    } catch (e) {
-      data = {};
-    }
-    if (!r.ok || !data.ok) {
-      setStartWebFeedback(
-        (data && data.error) || ('启动失败 (HTTP ' + r.status + ')'),
-        'err'
-      );
-      return;
-    }
-
-    setStartWebFeedback('已发出启动请求，等待 Web 就绪…', null);
-    const live = await waitForWebLive(15000);
-    if (live) {
-      setStartWebFeedback('Web UI 已启动', 'ok');
-      await pollStatus();
-    } else {
-      setStartWebFeedback(
-        '已请求启动，但尚未探测到 http://localhost:' + WEB_PORT +
-        '。可刷新或查看：tail "' + paths.work + '/_meta/logs/web.log"',
-        'err'
-      );
-    }
-  } catch (e) {
-    setStartWebFeedback('启动失败: ' + e.message, 'err');
-  } finally {
-    buttons.forEach(function (b, i) {
-      b.disabled = false;
-      b.textContent = originals[i];
-    });
-  }
-}
 
 function syncAlertPriority() {
   const mismatch = document.getElementById('workMismatchCard');
@@ -2159,12 +2322,12 @@ function syncAlertPriority() {
   }
 }
 
-// Open the Web UI in a new tab
+// Open the Web UI in the same tab so browser Back returns to Dashboard.
 function openWeb() {
   try {
     localStorage.setItem('picvault.dashboard.url', location.href);
   } catch (e) { /* ignore */ }
-  window.open('http://localhost:' + WEB_PORT + '/', '_blank');
+  window.location.assign('http://localhost:' + WEB_PORT + '/');
 }
 
 // Initial poll + every 5s; only auto-attach if a run is still in progress

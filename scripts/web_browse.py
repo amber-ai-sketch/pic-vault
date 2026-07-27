@@ -29,7 +29,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault', '/Users/ym/Downloads/pic-test')
 ALLOWED_BACKUP_PREFIXES = ('/Volumes/WD4T/MediaVault', '/Volumes/YM/MediaVault')
 THUMB_CACHE = '_meta/thumbs'
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.hevc', '.webm'}
@@ -799,8 +799,25 @@ def load_stars(work: Path, bucket: str) -> dict:
     try:
         data = json.loads(path.read_text())
         if isinstance(data, list):
-            return {k: True for k in data}
-        return {k: bool(v) for k, v in data.items() if v}
+            entries = data
+        elif isinstance(data, dict):
+            entries = [k for k, v in data.items() if v]
+        else:
+            return {}
+        stars = {}
+        work_res = work.resolve()
+        for rel in entries:
+            if not isinstance(rel, str):
+                continue
+            full = safe_under_work(work, rel)
+            if full is None or not full.is_file():
+                continue
+            try:
+                rel_norm = str(full.resolve().relative_to(work_res))
+            except (OSError, ValueError):
+                continue
+            stars[rel_norm] = True
+        return stars
     except Exception:
         return {}
 
@@ -928,7 +945,7 @@ PAGE_CSS = '''
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body {
+  body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--sans);
@@ -1707,6 +1724,7 @@ body.select-mode .cell .fname {
   html { scroll-behavior: auto; }
   .chip, .btn-reclass, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
+
 '''
 
 PAGE_JS = '''
@@ -2893,17 +2911,7 @@ def count_starred(work: Path) -> int:
     stars_dir = work / '_meta' / 'stars'
     if not stars_dir.exists():
         return 0
-    total = 0
-    for f in stars_dir.glob('*.json'):
-        try:
-            data = json.loads(f.read_text())
-            if isinstance(data, dict):
-                total += sum(1 for v in data.values() if v)
-            elif isinstance(data, list):
-                total += len(data)
-        except Exception:
-            pass
-    return total
+    return sum(len(load_stars(work, f.stem)) for f in stars_dir.glob('*.json'))
 
 
 def last_sync_time(work: Path) -> str:
@@ -4139,7 +4147,6 @@ def main():
 
         # --- init / web lifecycle ---
         'init':         lambda _b: ['bash', str(INIT_SCRIPT), '--work', w],
-        'web_start':    lambda _b: [pb, 'web', 'start'],
         'web_stop':     lambda _b: [pb, 'web', 'stop'],
 
         # --- dedupe (dry-run by default; apply moves files) ---

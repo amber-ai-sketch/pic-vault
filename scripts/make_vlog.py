@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault')
+ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault', '/Users/ym/Downloads/pic-test')
 ALLOWED_TRANSITIONS = frozenset({
     'concat',
     'crossfade-0.5s',
@@ -97,6 +97,32 @@ def find_ffmpeg() -> str:
     return path
 
 
+def find_ffprobe() -> str:
+    """Find ffprobe in PATH."""
+    path = shutil.which('ffprobe')
+    if not path:
+        raise RuntimeError("ffprobe not found; install with: brew install ffmpeg")
+    return path
+
+
+def probe_has_audio(path: Path) -> bool:
+    """Return True when ffprobe sees an audio stream."""
+    result = subprocess.run(
+        [find_ffprobe(), '-v', 'error', '-select_streams', 'a:0',
+         '-show_entries', 'stream=index', '-of', 'json', str(path)],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffprobe failed for {path}: {(result.stderr or result.stdout).strip() or 'unknown error'}"
+        )
+    try:
+        data = json.loads(result.stdout or '{}')
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"ffprobe returned invalid JSON for {path}") from e
+    return bool(data.get('streams'))
+
+
 def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
     """Build ffmpeg -filter_complex for trim/xfade/concat.
 
@@ -107,6 +133,17 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
     if n == 0:
         raise ValueError("EDL has no clips")
 
+    def audio_branch(i: int, clip: dict) -> str:
+        in_t = clip.get('in', 0)
+        out_t = clip['out']
+        dur = out_t - in_t
+        if clip.get('has_audio', True):
+            return (
+                f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS,"
+                f"aresample=48000,aformat=channel_layouts=stereo[a{i}]"
+            )
+        return f"anullsrc=r=48000:cl=stereo,atrim=duration={dur},asetpts=PTS-STARTPTS[a{i}]"
+
     if n == 1:
         # Single clip: just trim
         c = clips[0]
@@ -114,7 +151,7 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
         out_t = c['out']
         filter_str = (
             f"[0:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v];"
-            f"[0:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a]"
+            f"{audio_branch(0, c)}"
         )
         return filter_str, "[v]", "[a]"
 
@@ -133,7 +170,7 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
             in_t = c.get('in', 0)
             out_t = c['out']
             parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
-            parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
+            parts.append(audio_branch(i, c))
 
         # Second pass: chain xfade (video) + acrossfade (audio)
         last_v = "[v0]"
@@ -159,7 +196,7 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
             last_a = xa_out
             offset = offset + dur - fade_dur
 
-        filter_str = ";" + chr(10) + "".join(parts)
+        filter_str = ";\n".join(parts)
         return filter_str, last_v, last_a
 
     # Plain concat (no transition)
@@ -168,10 +205,10 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
         in_t = c.get('in', 0)
         out_t = c['out']
         parts.append(f"[{i}:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[v{i}]")
-        parts.append(f"[{i}:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[a{i}]")
+        parts.append(audio_branch(i, c))
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(n))
     parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[v][a]")
-    filter_str = ";" + chr(10) + "".join(parts)
+    filter_str = ";\n".join(parts)
     return filter_str, "[v]", "[a]"
 
 
@@ -209,7 +246,12 @@ def main():
     try:
         transition = validate_transition(args.style)
         clips = [validate_clip(work, c, i) for i, c in enumerate(clips_raw)]
+        for clip in clips:
+            clip['has_audio'] = probe_has_audio(clip['path'])
     except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
