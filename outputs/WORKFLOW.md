@@ -255,11 +255,11 @@ picvault theme rebucket --theme <主题名> --yes   # 让该主题配置生效�
 ```bash
 # 带主题
 ./scripts/pick_to_iphone.py --bucket 2026-07_海南
-# 复制到 _favorite/2026-07_海南/，生成 favorite-2026-07_海南.scpt
+# 刷新 _favorite/2026-07_海南/，生成 favorite-2026-07_海南.scpt
 
 # 无主题
 ./scripts/pick_to_iphone.py --bucket 2026-08
-# 复制到 _favorite/ 根，生成 favorite-2026-08.scpt
+# 刷新 _favorite/2026-08/，生成 favorite-2026-08.scpt（Photos 相簿名仍为 Picks）
 ```
 
 ### 8. 跑 AppleScript

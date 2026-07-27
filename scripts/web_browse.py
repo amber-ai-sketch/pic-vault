@@ -799,8 +799,25 @@ def load_stars(work: Path, bucket: str) -> dict:
     try:
         data = json.loads(path.read_text())
         if isinstance(data, list):
-            return {k: True for k in data}
-        return {k: bool(v) for k, v in data.items() if v}
+            entries = data
+        elif isinstance(data, dict):
+            entries = [k for k, v in data.items() if v]
+        else:
+            return {}
+        stars = {}
+        work_res = work.resolve()
+        for rel in entries:
+            if not isinstance(rel, str):
+                continue
+            full = safe_under_work(work, rel)
+            if full is None or not full.is_file():
+                continue
+            try:
+                rel_norm = str(full.resolve().relative_to(work_res))
+            except (OSError, ValueError):
+                continue
+            stars[rel_norm] = True
+        return stars
     except Exception:
         return {}
 
@@ -2894,17 +2911,7 @@ def count_starred(work: Path) -> int:
     stars_dir = work / '_meta' / 'stars'
     if not stars_dir.exists():
         return 0
-    total = 0
-    for f in stars_dir.glob('*.json'):
-        try:
-            data = json.loads(f.read_text())
-            if isinstance(data, dict):
-                total += sum(1 for v in data.values() if v)
-            elif isinstance(data, list):
-                total += len(data)
-        except Exception:
-            pass
-    return total
+    return sum(len(load_stars(work, f.stem)) for f in stars_dir.glob('*.json'))
 
 
 def last_sync_time(work: Path) -> str:

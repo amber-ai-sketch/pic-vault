@@ -95,6 +95,35 @@ def test_pick_absolute_star_rejected():
               '/Volumes/Storage/_favorite"' not in scpt.replace('/Volumes/Storage/_favorite/2026-08', ''))
 
 
+def test_pick_refresh_clears_stale_files():
+    print('\n2b. pick_to_iphone.py refreshes _favorite bucket')
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        stars_dir = work / '_meta' / 'stars'
+        stars_dir.mkdir(parents=True)
+        (work / 'a.txt').write_text('a', encoding='utf-8')
+        (work / 'b.txt').write_text('b', encoding='utf-8')
+
+        env = {**os.environ, 'DUPEGURU_TEST': '1'}
+        stars_file = stars_dir / 'screenshots.json'
+        stars_file.write_text(json.dumps({'a.txt': True, 'b.txt': True}), encoding='utf-8')
+        rc, out, err = run([
+            'python3', str(SCRIPTS / 'pick_to_iphone.py'),
+            '--work', str(work), '--bucket', 'screenshots',
+        ], env=env)
+        fav_dir = work / '_favorite' / 'screenshots'
+        first = sorted(p.name for p in fav_dir.iterdir()) if fav_dir.exists() else []
+        check('first export copies both stars', rc == 0 and first == ['a.txt', 'b.txt'], detail=out + err)
+
+        stars_file.write_text(json.dumps({'a.txt': True}), encoding='utf-8')
+        rc2, out2, err2 = run([
+            'python3', str(SCRIPTS / 'pick_to_iphone.py'),
+            '--work', str(work), '--bucket', 'screenshots',
+        ], env=env)
+        second = sorted(p.name for p in fav_dir.iterdir()) if fav_dir.exists() else []
+        check('second export removes unstarred stale file', rc2 == 0 and second == ['a.txt'], detail=out2 + err2)
+
+
 def test_make_vlog_path_escape():
     print('\n3. make_vlog.py EDL path / transition / in-out')
     import make_vlog as mv
@@ -173,6 +202,43 @@ def test_make_vlog_path_escape():
         mixed_filter, _, _ = mv.build_filter_complex([silent, loud], 'crossfade-1s')
         check('mixed clips synthesize silence', 'anullsrc' in mixed_filter and 'acrossfade' in mixed_filter)
         check('mixed clips normalize audio', 'aresample=48000' in mixed_filter and 'aformat=channel_layouts=stereo' in mixed_filter)
+
+        concat_filter, _, _ = mv.build_filter_complex([silent, loud], 'concat')
+        check('multi concat filter separates chains', ';\n[1:v]' in concat_filter and ';\n[v0][a0][v1][a1]concat' in concat_filter)
+        check('multi concat filter has no joined labels', '][1:v]' not in concat_filter and not concat_filter.startswith(';'))
+        check('multi crossfade filter separates chains', ';\n[1:v]' in mixed_filter and ';\n[v0][v1]xfade' in mixed_filter)
+
+
+def test_picvault_star_file_sandbox():
+    print('\n3b. picvault star rejects paths outside work')
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        media = work / 'screenshots' / 'a.jpg'
+        media.parent.mkdir(parents=True)
+        media.write_bytes(b'ok')
+        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
+
+        rc, out, err = run([str(PICVAULT), 'star', 'screenshots', '/etc/passwd'], env=env)
+        check('CLI star rejects outside absolute path', rc != 0 and 'outside work' in (out + err).lower())
+
+        rc2, out2, err2 = run([str(PICVAULT), 'star', 'screenshots', str(media)], env=env)
+        stars_file = work / '_meta' / 'stars' / 'screenshots.json'
+        data = json.loads(stars_file.read_text(encoding='utf-8')) if stars_file.exists() else {}
+        check('CLI star stores normalized relative path', rc2 == 0 and data == {'screenshots/a.jpg': True}, detail=out2 + err2)
+
+
+def test_web_starred_ignores_invalid_paths():
+    print('\n3c. web starred ignores invalid historical entries')
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        stars_dir = work / '_meta' / 'stars'
+        stars_dir.mkdir(parents=True)
+        (stars_dir / 'screenshots.json').write_text(json.dumps({'/etc/passwd': True}), encoding='utf-8')
+
+        body = wb.render_starred(work, work / '_meta' / 'thumbs')
+        check('invalid absolute star skipped', wb.list_all_starred(work) == [])
+        check('invalid absolute star not counted', wb.count_starred(work) == 0)
+        check('starred page still renders', b'\xe5\x8a\xa0\xe6\x98\x9f' in body)
 
 
 def test_init_storage_example_seed_avoids_readlink():
@@ -286,7 +352,10 @@ def main():
     print('Path sandbox negative tests')
     test_dedupe_batch_escape()
     test_pick_absolute_star_rejected()
+    test_pick_refresh_clears_stale_files()
     test_make_vlog_path_escape()
+    test_picvault_star_file_sandbox()
+    test_web_starred_ignores_invalid_paths()
     test_init_storage_example_seed_avoids_readlink()
     test_sync_writes_last_sync_log()
     test_picvault_check_path_dotdot()

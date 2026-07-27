@@ -227,8 +227,8 @@ iPhone Favorites、Android 相册星标都在系统相册数据库，不在照�
 │   └── ...
 ├── _favorite/
 │   ├── 2026-07_海南/               # 带主题：来自主题桶 → 同名子目录
+│   ├── 2026-08/                    # 无主题：按 bucket 建子目录，Photos 相簿名仍为 Picks
 │   ├── 2026-08_夏令营/
-│   ├── 20260801_xxx_canon_a3f2.jpg # 无主题：来自月份桶 → 平铺根
 │   └── ...
 ├── _vlogs/
 ├── _trash/
@@ -493,7 +493,7 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
 | 文件系统侧 | Photos 侧 |
 |---|---|
 | `_favorite/2026-07_海南/` 文件夹 | 相簿 `"2026-07_海南"` |
-| `_favorite/` 平铺根 | 相簿 `"Picks"`（固定名，与 bucket 无关）|
+| `_favorite/<bucket>/` 无主题月份文件夹 | 相簿 `"Picks"`（固定名，与 bucket 无关）|
 | 文件本身 | Photos 媒体项 + `favorite=true`（⭐）|
 
 四件事：
@@ -512,7 +512,7 @@ cp -r /Volumes/WD4T/MediaVault/2025 /Volumes/YM/MediaVault/_pre_migration_backup
 $ ./scripts/pick_to_iphone.py --bucket 2026-07_海南
 
 ✓ 读取 _meta/stars/2026-07_海南.json：23 张
-✓ 复制到 /Volumes/Storage/_favorite/2026-07_海南/
+✓ 刷新 /Volumes/Storage/_favorite/2026-07_海南/
 ✓ 生成 _meta/scripts/favorite-2026-07_海南.scpt
 
 下一步：
@@ -521,16 +521,14 @@ $ ./scripts/pick_to_iphone.py --bucket 2026-07_海南
 $ ./scripts/pick_to_iphone.py --bucket 2026-08
 
 ✓ 读取 _meta/stars/2026-08.json：12 张
-✓ 复制到 /Volumes/Storage/_favorite/             ← 平铺根
+✓ 刷新 /Volumes/Storage/_favorite/2026-08/
 ✓ 生成 _meta/scripts/favorite-2026-08.scpt
 ```
 
 行为：
 - 读 `_meta/stars/<bucket>.json`
-- bucket 名是否含 `_`：
-  - 含 → `_favorite/<theme>/`
-  - 不含 → `_favorite/` 平铺
-- `shutil.copy2()` 真实复制
+- 每次先刷新 `_favorite/<bucket>/`，移除该 bucket 上次导出的旧文件
+- `shutil.copy2()` 真实复制当前星标文件
 
 ### Step 3：AppleScript（带主题版）
 
@@ -568,7 +566,7 @@ end run
 ```applescript
 on run
     set bucketName to "2026-08"
-    set folderPath to "/Volumes/Storage/_favorite"
+    set folderPath to "/Volumes/Storage/_favorite/2026-08"
     set albumName to "Picks"   -- 固定名，与 bucket 无关
 
     tell application "Photos"
@@ -738,7 +736,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 | 文档桶 | `docs/`，仅手动移入；命名 `doc_…` |
 | 物品桶 | `things/`，仅手动移入；命名 `things_…` |
 | 精选目录 | `_favorite/` |
-| 精选子目录结构 | 带主题 → 同名子目录；无主题 → 平铺根 |
+| 精选子目录结构 | 每个 bucket 一个子目录；无主题月份也用 `_favorite/<bucket>/` |
 | 带主题精选相簿名 | = 主题名（如 `"2026-07_海南"`） |
 | 无主题精选相簿名 | 固定 `"Picks"`（与 bucket 无关） |
 | 精选导出 | 真实复制 + AppleScript |
@@ -780,7 +778,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
 - `sync_to_backup.sh`：size/mtime 一致；白名单含 `screenrecords/`；WD4T 上 `garbage.txt`（root）不被 sync 改动
 - `web_browse.py`：核心路由 200
 - `pick_to_iphone.py --bucket 2026-07_海南`：复制到 `_favorite/2026-07_海南/`，`.scpt` 中 `albumName = "2026-07_海南"`
-- `pick_to_iphone.py --bucket 2026-08`：复制到 `_favorite/` 平铺，`.scpt` 中 `albumName = "Picks"`
+- `pick_to_iphone.py --bucket 2026-08`：刷新 `_favorite/2026-08/`，`.scpt` 中 `albumName = "Picks"`
 - AppleScript 校验：
   - 含 `skip checking duplicates yes`（不是 `no`）
   - 含 `favorite` 属性赋值

@@ -196,7 +196,7 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
             last_a = xa_out
             offset = offset + dur - fade_dur
 
-        filter_str = ";" + chr(10) + "".join(parts)
+        filter_str = ";\n".join(parts)
         return filter_str, last_v, last_a
 
     # Plain concat (no transition)
@@ -208,7 +208,7 @@ def build_filter_complex(clips: list, transition: str) -> tuple[str, str, str]:
         parts.append(audio_branch(i, c))
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(n))
     parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[v][a]")
-    filter_str = ";" + chr(10) + "".join(parts)
+    filter_str = ";\n".join(parts)
     return filter_str, "[v]", "[a]"
 
 

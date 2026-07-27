@@ -115,6 +115,20 @@ end run
 """
 
 
+def clear_directory_contents(path: Path) -> int:
+    """Remove generated files from a per-bucket _favorite/ directory."""
+    if not path.exists():
+        return 0
+    removed = 0
+    for child in path.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+        removed += 1
+    return removed
+
+
 def main():
     parser = argparse.ArgumentParser(description='Build _favorite/ from stars + generate AppleScript')
     parser.add_argument('--work', default='/Volumes/Storage')
@@ -142,7 +156,17 @@ def main():
 
     # Always copy into a per-bucket subset under _favorite/ (never whole tree for AS import)
     target_dir = work / '_favorite' / bucket
-    target_dir.mkdir(parents=True, exist_ok=True)
+    removed_existing = 0
+    if args.dry_run:
+        existing_items = list(target_dir.iterdir()) if target_dir.is_dir() else []
+        if existing_items:
+            print(
+                f"  [dry-run] would refresh {target_dir.relative_to(work)} "
+                f"({len(existing_items)} existing item(s) removed)"
+            )
+    else:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        removed_existing = clear_directory_contents(target_dir)
 
     if is_themed:
         album_name = bucket
@@ -164,7 +188,7 @@ def main():
             missing.append(star)
             continue
         dest = target_dir / src.name
-        if dest.exists():
+        if not args.dry_run and dest.exists():
             # Same name; check content hash
             if src.read_bytes() == dest.read_bytes():
                 continue  # already copied
@@ -176,23 +200,27 @@ def main():
 
         if args.dry_run:
             print(f"  [dry-run] {src.name} -> {target_dir.relative_to(work)}")
+            copied += 1
         else:
             shutil.copy2(src, dest)
             copied += 1
 
     # Generate AppleScript pointing at this run's subset under actual work
     scpt_dir = work / '_meta' / 'scripts'
-    scpt_dir.mkdir(parents=True, exist_ok=True)
     scpt_path = scpt_dir / f"favorite-{bucket}.scpt"
     folder_path = str(target_dir.resolve())
 
     if args.dry_run:
         print(f"  [dry-run] would write {scpt_path}")
     else:
+        scpt_dir.mkdir(parents=True, exist_ok=True)
         scpt_path.write_text(generate_applescript(bucket, album_name, folder_path))
 
     prefix = '[dry-run] Would' if args.dry_run else '✓ Did'
-    print(f"\n{prefix} copy {copied} files to {target_dir}")
+    print(f"\n{prefix} refresh {target_dir}")
+    print(f"  copy:  {copied} files")
+    if removed_existing:
+        print(f"  clear: {removed_existing} previous item(s)")
     if rejected:
         print(f"⚠️  {len(rejected)} starred paths rejected (outside work):")
         for m in rejected[:5]:

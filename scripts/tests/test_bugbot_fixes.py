@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -72,6 +73,33 @@ def test_dashboard_web_start_copy():
     check('step 04 keeps open browse', 'id="openWebBtnStep"' in text)
     check('open browse stays in same tab', "window.location.assign('http://localhost:' + WEB_PORT + '/')" in text)
     check('open browse no longer new tab', "window.open('http://localhost:' + WEB_PORT + '/', '_blank')" not in text)
+
+
+def test_picvault_web_port_state():
+    print('\n1d. picvault web status uses persisted custom port')
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        meta = work / '_meta'
+        meta.mkdir(parents=True)
+        (meta / 'web.pid').write_text(str(os.getpid()), encoding='utf-8')
+        (meta / 'web.port').write_text('8777', encoding='utf-8')
+        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
+
+        status = subprocess.run(
+            [str(PICVAULT), 'status'], env=env,
+            capture_output=True, text=True,
+        )
+        web_status = subprocess.run(
+            [str(PICVAULT), 'web', 'status'], env=env,
+            capture_output=True, text=True,
+        )
+        no_action = subprocess.run(
+            [str(PICVAULT), 'web'], env=env,
+            capture_output=True, text=True,
+        )
+        check('picvault status uses web.port', 'http://localhost:8777/' in (status.stdout + status.stderr))
+        check('picvault web status uses web.port', 'http://localhost:8777/' in (web_status.stdout + web_status.stderr))
+        check('picvault web no action prints usage', no_action.returncode != 0 and 'Usage: picvault web' in (no_action.stdout + no_action.stderr))
 
 
 def test_console_link_shows_dashboard_url():
@@ -2181,6 +2209,7 @@ def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
     test_dashboard_web_start_copy()
+    test_picvault_web_port_state()
     test_console_link_shows_dashboard_url()
     test_init_skeleton()
     test_run_commands_backup_and_pipeline()
