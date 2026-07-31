@@ -1350,11 +1350,25 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   top: 0;
   z-index: 10;
 }
-.toolbar .count {
+.toolbar-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin-right: auto;
+  min-width: 12rem;
+}
+.toolbar-title {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.025em;
+}
+.toolbar-meta {
   font-family: var(--sans);
   font-size: var(--text-xs);
   color: var(--muted);
-  margin-right: auto;
   letter-spacing: 0;
 }
 .toolbar-filters {
@@ -1441,14 +1455,6 @@ body.select-mode .toolbar-organize { display: flex; }
   color: var(--ink);
   min-width: 4.5em;
 }
-.toolbar .filter-tip {
-  font-family: var(--sans);
-  font-size: var(--text-xs);
-  color: var(--muted);
-  margin-left: 6px;
-  letter-spacing: 0.02em;
-}
-.toolbar .filter-tip::before { content: '说明：'; }
 .toolbar .review-tip {
   font-size: var(--text-xs);
   color: var(--muted);
@@ -1508,31 +1514,7 @@ body.select-mode .toolbar-organize { display: flex; }
 }
 .btn-more:hover { background: var(--paper); border-color: var(--ink); }
 .btn-more.busy { opacity: 0.45; pointer-events: none; }
-.back-top {
-  position: fixed;
-  right: clamp(18px, 4vw, 44px);
-  top: calc(env(safe-area-inset-top) + 96px);
-  z-index: 30;
-  padding: 9px 14px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-8px);
-  transition: opacity .16s ease, transform .16s ease, border-color .12s ease;
-  box-shadow: 0 10px 30px rgba(20,20,20,0.08);
-}
-.back-top.show {
-  opacity: 1;
-  pointer-events: auto;
-  transform: none;
-}
-.back-top:hover,
-.back-top:focus-visible { border-color: var(--ink); }
+.chip.back-top { color: var(--ink); }
 
 .ledger {
   border-top: 1px solid var(--line);
@@ -2617,17 +2599,12 @@ PAGE_JS = '''
   function setupBackTop() {
     var btn = document.getElementById('backTopBtn');
     if (!btn) return;
-    function syncBackTop() {
-      btn.classList.toggle('show', window.scrollY > 480);
-    }
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       var reduce = window.matchMedia
         && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
     });
-    window.addEventListener('scroll', syncBackTop, { passive: true });
-    syncBackTop();
   }
 
   function setupGalleryEnhancements() {
@@ -3019,7 +2996,7 @@ def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
 
 
 def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
-                     paginated: bool = False) -> str:
+                     paginated: bool = False, title: str = '') -> str:
     """context: normal | theme | screen | docs | things — hide the button for the current bucket."""
     actions = []
     if context != 'starred':
@@ -3056,31 +3033,37 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         '<button type="button" class="btn-trash" data-trash="1" disabled>'
         '移至回收站</button>'
     )
-    filter_tip = (
-        '<span class="filter-tip">先加载更多，再筛选；否则只看已显示的缩略图。</span>'
-        if paginated else ''
-    )
     star_filter = ''
     if context != 'starred':
         star_filter = (
             '<button type="button" class="chip" data-filter="starred">'
             f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
         )
+    back_top = ''
+    if paginated:
+        back_top = (
+            '<button type="button" class="chip back-top" id="backTopBtn">'
+            '↑ 返回顶部</button>'
+        )
     review_tip = (
         '<p class="review-tip">打开预览后按 <kbd>空格</kbd> 勾选当前并进入下一张；'
         '加星、原图和删除仍可单独操作。</p>'
         if file_count else ''
     )
+    title_html = _esc(title or '图库')
     return (
         f'<div class="toolbar">'
-        f'<span class="count">文件 {file_count}｜'
+        f'<div class="toolbar-main">'
+        f'<span class="toolbar-title">{title_html}</span>'
+        f'<span class="toolbar-meta">文件 {file_count}｜'
         f'加星 <span id="pageMetaStars">{star_count}</span></span>'
+        f'</div>'
         f'<div class="toolbar-filters">'
         f'<button type="button" class="chip on" data-filter="all">全部</button>'
         f'{star_filter}'
         f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
         f'aria-pressed="false">批量选择</button>'
-        f'{filter_tip}'
+        f'{back_top}'
         f'</div>'
         f'<div class="toolbar-organize" aria-label="整理">'
         f'<span class="sel-count" id="selCount"></span>'
@@ -3180,16 +3163,9 @@ def _gallery_sheet_html(
             '加载更多</button>'
             '</div>'
         )
-    back_top = ''
-    if large_gallery:
-        back_top = (
-            '<button type="button" class="back-top" id="backTopBtn" '
-            'aria-label="返回顶部">↑ 返回顶部</button>'
-        )
     return (
         f'<div class="sheet" id="sheet" {" ".join(attrs)}>{cells}</div>'
         f'{more}'
-        f'{back_top}'
     )
 
 
@@ -3525,7 +3501,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">{_esc(display)}</h2>'
         f'<p class="page-meta">{_esc(meta)}</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(stars), context=gallery_ctx, paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context=gallery_ctx, paginated=paginated, title=display)}'
         f'{sheet}'
     )
     return page_shell(
@@ -3556,7 +3532,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">截图</h2>'
         f'<p class="page-meta">截图单独分出，适合快速清理和复核。</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated, title="截图")}'
         f'{sheet}'
     )
     return page_shell(
@@ -3582,7 +3558,7 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">录屏</h2>'
         f'<p class="page-meta">录屏集中在这里，方便回看和清理。</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated, title="录屏")}'
         f'{sheet}'
     )
     return page_shell(
@@ -3608,7 +3584,7 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">文档</h2>'
         f'<p class="page-meta">证件、票据和纸面信息，从图库手动移入。</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated, title="文档")}'
         f'{sheet}'
     )
     return page_shell(
@@ -3634,7 +3610,7 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">物品</h2>'
         f'<p class="page-meta">设备、包装和物件记录，从图库手动移入。</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated, title="物品")}'
         f'{sheet}'
     )
     return page_shell(
@@ -3661,7 +3637,7 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">加星</h2>'
         f'<p class="page-meta">已加星 {len(entries)} 个，汇总所有桶里的精选。</p>'
         f'</div>'
-        f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated)}'
+        f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated, title="加星")}'
         f'{sheet}'
     )
     return page_shell(

@@ -2540,8 +2540,8 @@ def test_gallery_pagination():
     check('PAGE_JS has loadMoreGallery', 'function loadMoreGallery' in wb.PAGE_JS)
     check('PAGE_JS has /api/gallery', '/api/gallery' in wb.PAGE_JS)
     check(
-        'filter tip copy',
-        '先加载更多，再筛选' in wb._gallery_toolbar(1, 0, paginated=True),
+        'filter tip copy removed',
+        '先加载更多，再筛选' not in wb._gallery_toolbar(1, 0, paginated=True),
     )
     # Starred filter hides non-star cells (display:none), so #galleryMore stays in
     # viewport and IntersectionObserver would otherwise cascade-load the whole library.
@@ -2577,7 +2577,7 @@ def test_gallery_pagination():
             detail=f'cells={cell_n} page={wb.GALLERY_PAGE_SIZE} total={n}',
         )
         check('screenshots has load more', 'data-load-more' in html and '加载更多' in html)
-        check('screenshots has filter tip', '先加载更多，再筛选' in html)
+        check('screenshots hides filter tip', '先加载更多，再筛选' not in html)
         check('screenshots count shows total', f'文件 {n}' in html)
         # list_screenshots sorts by mtime desc → newest (n-1) on page 1; oldest (0) on last page
         check(
@@ -2755,7 +2755,7 @@ def test_large_gallery_month_groups_and_back_top():
     print('\n30. Large gallery month groups and back-to-top')
 
     check('PAGE_JS sets up back top', 'function setupBackTop' in wb.PAGE_JS)
-    check('PAGE_JS toggles back top visibility', "classList.toggle('show'" in wb.PAGE_JS)
+    check('PAGE_JS scrolls to top', 'window.scrollTo({ top: 0' in wb.PAGE_JS)
     check('PAGE_JS updates month visibility', 'function updateGalleryMonthVisibility' in wb.PAGE_JS)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -2780,12 +2780,10 @@ def test_large_gallery_month_groups_and_back_top():
         check('large gallery shows July divider', '2026 年 7 月' in html)
         check('large gallery first page omits unloaded June divider', '2026 年 6 月' not in html)
         check('large gallery has back top button', 'id="backTopBtn"' in html and '返回顶部' in html)
-        back_top_css = re.search(r'\.back-top \{(?P<body>.*?)\n\}', wb.PAGE_CSS, re.S)
-        back_top_body = back_top_css.group('body') if back_top_css else ''
         check(
-            'back top floats above bottom paging area',
-            'top:' in back_top_body and 'bottom:' not in back_top_body,
-            detail=back_top_body.strip(),
+            'back top lives in sticky toolbar',
+            '<div class="toolbar">' in html
+            and html.find('id="backTopBtn"') < html.find('<div class="sheet"'),
         )
 
         page2 = wb.build_gallery_page_payload(
@@ -2836,6 +2834,36 @@ def test_lightbox_video_controls_not_covered_by_action_bar():
     check('lightbox action bar offset uses safe area', 'env(safe-area-inset-bottom)' in wb.PAGE_CSS)
 
 
+def test_sticky_gallery_toolbar_title_stats_and_top_action():
+    """Sticky gallery toolbar carries folder title, merged stats, top action, and no paging tip."""
+    print('\n32. Sticky gallery toolbar is compact and actionable')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        thumbs = work / '_meta' / 'thumbs'
+        shots = work / 'screenshots'
+        thumbs.mkdir(parents=True)
+        shots.mkdir(parents=True)
+
+        for i in range(wb.GALLERY_PAGE_SIZE + 1):
+            name = f'screenshot_20260715_120000_{i:04x}.jpg'
+            (shots / name).write_bytes(b'x')
+
+        html = wb.render_screenshots(work, thumbs).decode('utf-8')
+        toolbar_pos = html.find('<div class="toolbar">')
+        sheet_pos = html.find('<div class="sheet"')
+        back_top_pos = html.find('id="backTopBtn"')
+        check('toolbar shows folder title', 'toolbar-title' in html and '截图' in html)
+        check('toolbar merges file stats with title', 'toolbar-meta' in html and '文件 151' in html)
+        check(
+            'toolbar has inline back top button',
+            'class="chip back-top"' in html and toolbar_pos < back_top_pos < sheet_pos,
+            detail=f'{toolbar_pos}, {back_top_pos}, {sheet_pos}',
+        )
+        check('toolbar no longer shows paging filter tip', '先加载更多，再筛选' not in html)
+        check('toolbar no longer uses old count block', 'class="count"' not in html)
+
+
 def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
@@ -2883,6 +2911,7 @@ def main():
     test_gallery_default_sort_by_capture_time_desc()
     test_large_gallery_month_groups_and_back_top()
     test_lightbox_video_controls_not_covered_by_action_bar()
+    test_sticky_gallery_toolbar_title_stats_and_top_action()
     print(f'\n{passed} passed, {failed} failed')
     sys.exit(1 if failed else 0)
 
