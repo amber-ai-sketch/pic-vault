@@ -1772,13 +1772,6 @@ body.select-mode .cell .fname {
   border-left: 1px solid var(--line);
 }
 .lb-group:first-of-type { border-left: none; padding-left: 0; }
-.lb-group-label {
-  color: var(--muted);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
 .lb-pick-wrap {
   display: inline-flex;
   align-items: center;
@@ -2550,12 +2543,10 @@ PAGE_JS = '''
       lb.className = 'lb';
       lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
         '<div class="lb-meta"><span class="pos"></span><span class="nm"></span></div>' +
-        '<div class="lb-group"><span class="lb-group-label">复核</span>' +
-        '<label class="lb-pick-wrap"><input type="checkbox" class="lb-pick">勾选</label>' +
+        '<div class="lb-group"><label class="lb-pick-wrap"><input type="checkbox" class="lb-pick">勾选</label>' +
         '<button type="button" class="star star-lb" title="加入加星">☆ 加星</button></div>' +
-        '<div class="lb-group"><span class="lb-group-label">文件</span>' +
-        '<a class="open-raw" href="#" target="_blank" rel="noopener">查看原图</a></div>' +
-        '<div class="lb-group"><span class="lb-group-label">危险</span>' +
+        '<div class="lb-group"><a class="open-raw" href="#" target="_blank" rel="noopener">查看原图</a></div>' +
+        '<div class="lb-group">' +
         '<button type="button" class="lb-trash">移至回收站</button>' +
         '<button type="button" id="lbClose">关闭</button></div></div>';
       document.body.appendChild(lb);
@@ -3443,12 +3434,14 @@ _HIDDEN_DIR_NOISE = frozenset({
 
 
 def is_user_media_file(path: Path) -> bool:
-    """True for countable media/docs files (excludes .DS_Store and most dotfiles)."""
+    """True for countable photo/video files (excludes .DS_Store and dotfiles)."""
     if not path.is_file():
         return False
     if path.name == '.DS_Store':
         return False
     if path.name.startswith('.') and path.name != '.source':
+        return False
+    if not rename_mod.is_media_file(path):
         return False
     return True
 
@@ -3457,6 +3450,7 @@ def count_files_in(dir_path: Path) -> int:
     """Count user-visible files under dir_path (aligned with rename_organize.scan_inbox).
 
     Skipped:
+      - files that are not recognized photos/videos
       - any file named exactly .DS_Store
       - any file whose name starts with '.' except '.source' (sidecar);
         Android '.trashed-*' / similar recycle noise is excluded from contact-sheet counts

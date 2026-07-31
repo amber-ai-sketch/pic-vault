@@ -775,6 +775,7 @@ osascript /Volumes/Storage/_meta/scripts/favorite-2026-08.scpt
   - **截图 → screenshots/**：`Screenshot_….png`；无 GPS 的非相机名 JPG/PNG
   - **录屏 → screenrecords/**：含 `record` 的视频；`RPReplay_*.mov`（无元数据）；无 Make/GPS 的普通视频
   - **仍进 by-date**：`VID_…` / `IMG_…` 等相机文件名；有完整 Make+GPS 的视频
+  - **跳过非媒体**：HTML、PDF、TXT 等不是照片/视频的文件留在 `inbox/`
   - 命名：截图 `screenshot_`、录屏 `screenrecorder_`
   - `reclassify_paths(to_screen|to_normal)` 双向纠错
 - `web_browse.py`：`/screenshots` `/screenrecords` `/api/reclassify` 可用

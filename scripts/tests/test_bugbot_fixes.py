@@ -412,6 +412,12 @@ def test_star_api_and_lightbox_sync():
         'function isTypingTarget' in js,
     )
     check('lightbox has pick checkbox', 'class="lb-pick"' in js and '勾选' in js)
+    check(
+        'lightbox action groups have no helper labels',
+        'lb-group-label">复核' not in js
+        and 'lb-group-label">文件' not in js
+        and 'lb-group-label">危险' not in js,
+    )
     check('lightbox space picks and advances', 'function pickCurrentAndAdvance' in js and "e.code === 'Space'" in js)
     check('lightbox pick syncs gallery cell', 'setPathPicked(path, true)' in js)
     check('lightbox has single delete', 'function trashLightboxCurrent' in js and 'class="lb-trash"' in js)
@@ -1418,6 +1424,41 @@ def test_rename_hardening_source_and_events_load():
             check('ensure dest under work', False)
         except ValueError:
             check('ensure dest under work', True)
+
+
+def test_rename_and_gallery_ignore_non_media_files():
+    print('\n17b. rename/gallery ignore non-media files')
+    import rename_organize as ro
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        inbox = work / 'inbox'
+        inbox.mkdir(parents=True)
+        html_file = inbox / 'screenshot_20260721_142950.html'
+        image_file = inbox / 'screenshot_20260721_142951.png'
+        html_file.write_text('<html></html>', encoding='utf-8')
+        image_file.write_bytes(b'not-real-png')
+
+        scanned = ro.scan_inbox(work)
+        check('scan_inbox ignores html files', html_file not in scanned)
+        check('scan_inbox keeps image files', image_file in scanned)
+
+        try:
+            ro.plan_destination(work, html_file, force_type=None)
+            html_rejected = False
+        except ValueError:
+            html_rejected = True
+        check('plan_destination rejects html files', html_rejected)
+
+        screenshots = work / 'screenshots'
+        screenshots.mkdir(parents=True)
+        old_html = screenshots / 'screenshot_20260721_142950.html'
+        old_png = screenshots / 'screenshot_20260721_142951.png'
+        old_html.write_text('<html></html>', encoding='utf-8')
+        old_png.write_bytes(b'png')
+        listed = wb.list_screenshots(work)
+        check('gallery hides existing html in screenshots', old_html not in listed)
+        check('gallery still lists screenshot images', old_png in listed)
 
 
 def test_cross_month_theme_start_bucket():
@@ -2600,6 +2641,7 @@ def main():
     test_theme_parse_validate_hardening()
     test_web_sync_cmd_is_dry_run()
     test_rename_hardening_source_and_events_load()
+    test_rename_and_gallery_ignore_non_media_files()
     test_cross_month_theme_start_bucket()
     test_return_to_default_month()
     test_theme_href_never_falls_back_to_default_month()
