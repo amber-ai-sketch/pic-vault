@@ -2666,7 +2666,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         )
 
     more_links = [
-        _jump('/by-date', '年月', by_date_n),
+        _jump('/by-date', '按日期', by_date_n),
         _jump('/starred', '加星', star_n),
         _jump('/screenshots', '截图', shots_n),
         _jump('/screenrecords', '录屏', records_n),
@@ -2927,7 +2927,7 @@ def _gallery_sheet_html(
         return _empty_state(
             empty_message,
             empty_text or '这里不会自动生成内容；完成对应步骤或从图库手动移入后会出现。',
-            empty_actions or [('回到图库', '/', False), ('打开年月', '/by-date', True)],
+            empty_actions or [('回到图库', '/', False), ('打开按日期', '/by-date', True)],
         )
     page = entries[:GALLERY_PAGE_SIZE]
     loaded = len(page)
@@ -3048,18 +3048,26 @@ def _home_card(label: str, count: int, desc: str, href: str = None,
     )
 
 
+def _by_date_home_meta(totals: dict) -> str:
+    parts = []
+    if int(totals.get('years') or 0):
+        parts.append(f"{int(totals.get('years') or 0)} 年")
+    if int(totals.get('months') or 0):
+        parts.append(f"{int(totals.get('months') or 0)} 个月")
+    if int(totals.get('themes') or 0):
+        parts.append(f"{int(totals.get('themes') or 0)} 个主题")
+    return '｜'.join(parts)
+
+
 def render_home(work: Path) -> bytes:
     star_n, buckets = get_topbar_stats(work)
     totals = _by_date_totals(buckets)
     by_date_n = totals['photos'] + totals['videos']
     trash_n = get_trash_count(work)
-    by_date_meta = (
-        f"{totals['years']} 年｜{totals['months']} 个月｜{totals['themes']} 主题｜"
-        f"{format_ledger_stats(totals['photos'], totals['videos'], totals['stars'], totals['lives'])}"
-    )
+    by_date_meta = _by_date_home_meta(totals)
     has_main_gallery = by_date_n > 0
     cards = [
-        _home_card('年月', by_date_n, '按年份和月份浏览普通照片和视频', '/by-date', by_date_meta, primary=has_main_gallery),
+        _home_card('按日期', by_date_n, '按拍摄时间浏览', '/by-date', by_date_meta, primary=has_main_gallery),
         _home_card('加星', star_n, '所有已加星的照片和视频', '/starred'),
         _home_card('截图', buckets.get('screenshots_count') or 0, '截图集中清理和复核', '/screenshots'),
         _home_card('录屏', buckets.get('screenrecords_count') or 0, '屏幕录制视频集中回看', '/screenrecords'),
@@ -3116,7 +3124,7 @@ def render_by_date_home(work: Path) -> bytes:
         )
     if not rows:
         ledger = _empty_state(
-            '还没有按年月归档的照片或视频',
+            '还没有按拍摄日期归档的照片或视频',
             '把素材放进 inbox 后，回到控制台执行“重命名并归档”；完成后会按拍摄时间出现在这里。',
             [('回到图库', '/', False), ('打开控制台', dashboard_file_url(), True)],
         )
@@ -3126,15 +3134,15 @@ def render_by_date_home(work: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<div>'
-        f'<h2 class="page-title">年月</h2>'
-        f'<p class="page-lede">按年份进入，再查看月份或主题桶。</p>'
+        f'<h2 class="page-title">按日期</h2>'
+        f'<p class="page-lede">先选年份，再查看月份或主题</p>'
         f'</div>'
         f'</div>'
         f'{ledger}'
     )
     return page_shell(
-        '年月', body, work=work,
-        crumbs=[('首页', '/'), ('年月', '/by-date')],
+        '按日期', body, work=work,
+        crumbs=[('首页', '/'), ('按日期', '/by-date')],
         buckets=buckets, star_n=star_n,
     )
 
@@ -3144,11 +3152,11 @@ def render_year(work: Path, year: str) -> bytes:
     if not by_date.exists():
         body = (
             f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
-            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到年月", "/by-date", True)])}'
+            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到按日期", "/by-date", True)])}'
         )
         return page_shell(
             year, body, work=work,
-            crumbs=[('首页', '/'), ('年月', '/by-date'), (year, f'/y/{year}')],
+            crumbs=[('首页', '/'), ('按日期', '/by-date'), (year, f'/y/{year}')],
         )
 
     months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
@@ -3193,7 +3201,7 @@ def render_year(work: Path, year: str) -> bytes:
         ledger = _empty_state(
             '这个年份还没有文件',
             '月份目录存在，但还没有可浏览的照片或视频。整理归档后再回来查看。',
-            [('回到年月', '/by-date', True)],
+            [('回到按日期', '/by-date', True)],
         )
     body = (
         f'<div class="page-head">'
@@ -3204,7 +3212,7 @@ def render_year(work: Path, year: str) -> bytes:
     )
     return page_shell(
         year, body, work=work,
-        crumbs=[('首页', '/'), ('年月', '/by-date'), (year, f'/y/{year}')],
+        crumbs=[('首页', '/'), ('按日期', '/by-date'), (year, f'/y/{year}')],
     )
 
 
@@ -3263,7 +3271,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         year=year, month=month,
         empty_message='这个入口还没有文件',
         empty_text='归档后，文件会按拍摄时间进入默认月桶；主题桶需要先配置主题，再执行主题同步。',
-        empty_actions=[('回到年月', '/by-date', False), ('打开主题配置', '/themes', True)],
+        empty_actions=[('回到按日期', '/by-date', False), ('打开主题配置', '/themes', True)],
     )
     meta = year
     if is_themed:
@@ -3286,7 +3294,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         work=work,
         crumbs=[
             ('首页', '/'),
-            ('年月', '/by-date'),
+            ('按日期', '/by-date'),
             (year, f'/y/{year}'),
             (display, f'/y/{year}/{urllib.parse.quote(month)}'),
         ],
@@ -3301,7 +3309,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='screenshots',
         empty_message='还没有截图',
         empty_text='截图会在整理归档时从 inbox 分出来。归档完成后，这里适合集中清理和快速复核。',
-        empty_actions=[('回到图库', '/', False), ('打开年月', '/by-date', True)],
+        empty_actions=[('回到图库', '/', False), ('打开按日期', '/by-date', True)],
     )
     body = (
         f'<div class="page-head">'

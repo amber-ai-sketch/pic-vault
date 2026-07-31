@@ -128,7 +128,7 @@ def test_gallery_menu_counts_and_dismissal():
         html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
         check(
             'gallery menu has by-date entry',
-            'href="/by-date"><span class="jump-name">年月</span>' in html,
+            'href="/by-date"><span class="jump-name">按日期</span>' in html,
         )
         check(
             'gallery menu theme count',
@@ -178,7 +178,7 @@ def test_home_overview_cards_and_by_date_route():
         wb.clear_web_caches()
         home = wb.render_home(work).decode('utf-8')
         check('home title is gallery overview', '<h2 class="page-title">图库</h2>' in home)
-        check('home has by-date card', '<span class="home-card-name">年月</span>' in home and 'href="/by-date"' in home)
+        check('home has by-date card', '<span class="home-card-name">按日期</span>' in home and 'href="/by-date"' in home)
         check('home no longer links years directly', 'href="/y/2026"' not in home)
         check('home screenshot count card', re.search(r'home-card-name">截图</span><span class="home-card-count">2 项</span>', home) is not None)
         check('home screenrecord count card', re.search(r'home-card-name">录屏</span><span class="home-card-count">1 项</span>', home) is not None)
@@ -190,13 +190,13 @@ def test_home_overview_cards_and_by_date_route():
         check('home trash is not a route link', 'href="/trash"' not in home)
 
         by_date = wb.render_by_date_home(work).decode('utf-8')
-        check('by-date title is 年月', '<h2 class="page-title">年月</h2>' in by_date)
+        check('by-date title is 按日期', '<h2 class="page-title">按日期</h2>' in by_date)
         check('by-date keeps year ledger', 'href="/y/2026"' in by_date)
 
         year = wb.render_year(work, '2026').decode('utf-8')
-        check('year breadcrumb includes 年月', 'href="/by-date">年月</a>' in year)
+        check('year breadcrumb includes 按日期', 'href="/by-date">按日期</a>' in year)
         bucket = wb.render_bucket(work, '2026', '2026-07', work / '_meta' / 'thumbs').decode('utf-8')
-        check('bucket breadcrumb includes 年月', 'href="/by-date">年月</a>' in bucket)
+        check('bucket breadcrumb includes 按日期', 'href="/by-date">按日期</a>' in bucket)
 
         src = inspect.getsource(wb.Handler.do_GET)
         check('handler has by-date route', "path == '/by-date'" in src and 'render_by_date_home' in src)
@@ -691,8 +691,8 @@ def test_ledger_star_live_counts():
         check('render_year keeps photos/videos', '照片 2｜视频 1' in year_html)
 
         home_html = wb.render_home(work).decode('utf-8')
-        check('render_home by-date totals include 加星', '加星 2' in home_html)
-        check('render_home by-date totals include Live', '实况 1' in home_html)
+        check('render_home by-date card keeps compact date meta', '1 年｜1 个主题' in home_html)
+        check('render_home by-date card hides detailed ledger stats', '照片 2｜视频 1｜加星 2｜实况 1' not in home_html)
 
 
 def test_events_api_edit():
@@ -2027,7 +2027,7 @@ def test_by_date_empty_copy_says_normal_archive():
             (work / 'screenshots' / f'screenshot_{i}.jpg').write_bytes(b'x')
         wb.clear_web_caches()
         html = wb.render_by_date_home(work).decode('utf-8')
-        check('by-date empty copy says year/month archive', '还没有按年月归档的照片或视频' in html)
+        check('by-date empty copy says date archive', '还没有按拍摄日期归档的照片或视频' in html)
         check('by-date empty copy keeps current hint', '把素材放进 inbox' in html)
         check('by-date empty copy keeps screenshot count separate', '截图</span><span class="n">2 项</span>' in html)
 
@@ -2333,8 +2333,8 @@ def test_perf_quick_wins_cache_and_thumb_headers():
         before_home = wb.render_home(work).decode('utf-8')
         wb.trash_paths(work, [str(stale_target.relative_to(work))])
         after_home = wb.render_home(work).decode('utf-8')
-        check('home count before trash includes target', 'home-card-name">年月</span><span class="home-card-count">2 项</span>' in before_home)
-        check('home count invalidated after trash', 'home-card-name">年月</span><span class="home-card-count">1 项</span>' in after_home)
+        check('home count before trash includes target', 'home-card-name">按日期</span><span class="home-card-count">2 项</span>' in before_home)
+        check('home count invalidated after trash', 'home-card-name">按日期</span><span class="home-card-count">1 项</span>' in after_home)
 
         # status counts: second call must not re-walk (spy count_files_in).
         count_calls = {'n': 0}
