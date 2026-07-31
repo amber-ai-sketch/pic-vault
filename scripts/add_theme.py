@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-add_theme.py - Interactively add a theme definition to events.yaml.
+add_theme.py - Add, list, or remove theme definitions in events.yaml.
 
 Usage:
     ./add_theme.py --work /Volumes/Storage --interactive
     ./add_theme.py --work /Volumes/Storage --name 海南 --month 2026-07 ...
+    ./add_theme.py --work /Volumes/Storage --list
+    ./add_theme.py --work /Volumes/Storage --remove 海南
 """
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -28,51 +31,21 @@ def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
     )
 
 
-def load_existing_themes(work: Path) -> list:
-    """Load existing themes from events.yaml."""
-    path = work / '_meta' / 'events.yaml'
-    if not path.exists():
-        return []
-    try:
-        text = path.read_text()
-        # Try YAML first
-        themes = []
-        in_themes = False
-        for line in text.split('\n'):
-            if line.startswith('themes:'):
-                in_themes = True
-                continue
-            if not in_themes:
-                continue
-            stripped = line.strip()
-            if stripped.startswith('#') or not stripped:
-                continue
-            if not line.startswith('  '):  # not indented under themes:
-                in_themes = False
-                continue
-            # Crude extraction - count a new theme when we see "- name:"
-            if stripped.startswith('- name:'):
-                themes.append({'_pending': True, 'name': stripped.split(':', 1)[1].strip()})
-            elif themes and '_pending' in themes[-1] and ':' in stripped:
-                k, _, v = stripped.partition(':')
-                themes[-1][k.strip()] = v.strip()
-                if k.strip() == 'files' or k.strip() == 'sources':
-                    themes[-1]['_multi'] = True
-        return themes
-    except Exception as e:
-        print(f"[warn] could not parse events.yaml: {e}", file=sys.stderr)
-        return []
-
-
 def _format_theme_yaml_block(theme: dict) -> str:
     """Format one theme as indented YAML list item lines."""
     lines = [f"  - name: {theme['name']}"]
     lines.append(f"    month: {theme['month']}")
 
-    if theme.get('date_range_start') and theme.get('date_range_end'):
+    date_range = theme.get('date_range') if isinstance(theme.get('date_range'), dict) else None
+    start = theme.get('date_range_start')
+    end = theme.get('date_range_end')
+    if date_range is not None:
+        start = start or date_range.get('start')
+        end = end or date_range.get('end')
+    if start and end:
         lines.append(f"    date_range:")
-        lines.append(f"      start: {theme['date_range_start']}")
-        lines.append(f"      end:   {theme['date_range_end']}")
+        lines.append(f"      start: {start}")
+        lines.append(f"      end:   {end}")
 
     if theme.get('sources'):
         sources_str = ", ".join(theme['sources'])
@@ -100,6 +73,64 @@ def _candidate_theme_dict(theme: dict) -> dict:
     if start or end:
         out['date_range'] = {'start': start or '', 'end': end or ''}
     return out
+
+
+def _theme_period(theme: dict) -> str:
+    dr = theme.get('date_range') if isinstance(theme.get('date_range'), dict) else None
+    start = end = ''
+    if dr is not None:
+        start = str(dr.get('start') or '').strip()
+        end = str(dr.get('end') or '').strip()
+    if not start:
+        start = str(theme.get('start') or '').strip()
+    if not end:
+        end = str(theme.get('end') or '').strip()
+    if start and end:
+        return f'{start} ~ {end}'
+    return start or end or ''
+
+
+def load_themes(work: Path) -> list:
+    """Load and validate themes from events.yaml."""
+    import rename_organize as ro
+
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        return []
+    text = path.read_text(encoding='utf-8')
+    themes = ro.parse_events_yaml_text(text)
+    ro.validate_events_themes(themes)
+    return themes
+
+
+def render_themes_yaml(themes: list) -> str:
+    """Render a canonical themes section."""
+    if not themes:
+        return 'themes: []\n'
+    return 'themes:\n' + ''.join(_format_theme_yaml_block(theme) for theme in themes)
+
+
+def split_events_yaml(text: str) -> tuple[str, str]:
+    """Split events.yaml into prefix before themes: and suffix after it."""
+    match = re.search(r'(?m)^themes:\s*(?:\[\s*\])?\s*$', text)
+    if not match:
+        raise ValueError('events.yaml missing themes section')
+
+    lines = text.splitlines(keepends=True)
+    header_line = text[:match.start()].count('\n')
+    section_end = len(lines)
+    for index in range(header_line + 1, len(lines)):
+        line = lines[index]
+        stripped = line.lstrip(' \t')
+        if not stripped.strip() or stripped.startswith('#'):
+            continue
+        if len(line) - len(stripped) == 0:
+            section_end = index
+            break
+
+    prefix = ''.join(lines[:header_line])
+    suffix = ''.join(lines[section_end:])
+    return prefix, suffix
 
 
 def prepare_theme_for_append(work: Path, theme: dict) -> dict:
@@ -161,7 +192,7 @@ def append_theme_to_events(work: Path, theme: dict, *, validate: bool = True):
 
     if validate:
         theme = prepare_theme_for_append(work, theme)
-    text = path.read_text()
+    text = path.read_text(encoding='utf-8')
     block = _format_theme_yaml_block(theme)
 
     # Fresh init / empty flow list: themes: [] → themes:\n  - name: ...
@@ -170,7 +201,7 @@ def append_theme_to_events(work: Path, theme: dict, *, validate: bool = True):
         text = text[: empty_flow.start()] + 'themes:\n' + block + text[empty_flow.end() :]
         if not text.endswith('\n'):
             text += '\n'
-        path.write_text(text)
+        path.write_text(text, encoding='utf-8')
         return
 
     # No themes key yet — add header then the item
@@ -178,13 +209,70 @@ def append_theme_to_events(work: Path, theme: dict, *, validate: bool = True):
         if not text.endswith('\n'):
             text += '\n'
         text += 'themes:\n' + block
-        path.write_text(text)
+        path.write_text(text, encoding='utf-8')
         return
 
     # Existing block-style list (or bare `themes:`) — append item
     if not text.endswith('\n'):
         text += '\n'
-    path.write_text(text + block)
+    path.write_text(text + block, encoding='utf-8')
+
+
+def remove_theme_from_events(work: Path, name: str) -> int:
+    """Remove a theme by name and rewrite events.yaml."""
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        raise FileNotFoundError(f'{path} does not exist')
+
+    themes = load_themes(work)
+    remaining = [theme for theme in themes if str(theme.get('name') or '').strip() != name]
+    if len(remaining) == len(themes):
+        raise ValueError(f'theme {name!r} not found')
+
+    text = path.read_text(encoding='utf-8')
+    prefix, suffix = split_events_yaml(text)
+    new_text = prefix + render_themes_yaml(remaining) + suffix
+    if not new_text.endswith('\n'):
+        new_text += '\n'
+
+    bak = path.with_name('events.yaml.bak')
+    shutil.copy2(path, bak)
+    path.write_text(new_text, encoding='utf-8')
+    return len(remaining)
+
+
+def list_themes(work: Path) -> list:
+    """Print themes in a readable summary format."""
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        print('No events.yaml', file=sys.stderr)
+        return []
+
+    themes = load_themes(work)
+    print()
+    print('Themes')
+    print('─────────────────────────────────────────')
+    if not themes:
+        print('  (none)')
+        print()
+        return themes
+
+    for theme in themes:
+        name = str(theme.get('name') or '?').strip() or '?'
+        month = str(theme.get('month') or '?').strip() or '?'
+        period = _theme_period(theme)
+        sources = ', '.join(str(source) for source in (theme.get('sources') or []) if str(source).strip())
+        files = theme.get('files') or []
+        details = [month]
+        if period:
+            details.append(period)
+        if sources:
+            details.append(f'sources={sources}')
+        if files:
+            details.append(f'files={len(files)}')
+        print(f"  {name:20s}  {'  '.join(details)}")
+    print()
+    return themes
 
 
 def prompt(question: str, default: str = '') -> str:
@@ -226,12 +314,17 @@ def interactive_add(work: Path) -> dict:
     sources_str = prompt("Source devices (comma-separated, empty=any)", "")
     sources = [s.strip() for s in sources_str.split(',') if s.strip()] if sources_str else []
 
+    files_str = prompt("Files (comma-separated basenames or paths, empty=skip)", "")
+    files = [s.strip() for s in files_str.split(',') if s.strip()] if files_str else []
+
     print()
     theme = {
         'name': name,
         'month': month,
         'sources': sources,
     }
+    if files:
+        theme['files'] = files
     if start and end:
         theme['date_range_start'] = start
         theme['date_range_end'] = end
@@ -243,11 +336,14 @@ def main():
     parser = argparse.ArgumentParser(description='Add theme to events.yaml')
     parser.add_argument('--work', default='/Volumes/Storage')
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--list', action='store_true')
+    parser.add_argument('--remove', default=None)
     parser.add_argument('--name', default=None)
     parser.add_argument('--month', default=None)
     parser.add_argument('--start', default=None)
     parser.add_argument('--end', default=None)
     parser.add_argument('--sources', default=None, help='Comma-separated')
+    parser.add_argument('--files', default=None, help='Comma-separated')
     args = parser.parse_args()
 
     try:
@@ -255,6 +351,27 @@ def main():
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
+
+    if args.list:
+        try:
+            list_themes(work)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if args.remove:
+        try:
+            remaining = remove_theme_from_events(work, args.remove)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"\n✓ Removed theme: {args.remove}")
+        print(f"  backup: {work}/_meta/events.yaml.bak")
+        print(f"  remaining themes: {remaining}")
+        print(f"\nNext step: picvault theme rebucket --theme {args.remove} [--yes]")
+        print("  or: picvault theme rebucket --all [--yes]")
+        return
 
     if args.interactive:
         theme = interactive_add(work)
@@ -279,6 +396,9 @@ def main():
             'month': month,
             'sources': [s.strip() for s in (args.sources or '').split(',') if s.strip()],
         }
+        files = [s.strip() for s in (args.files or '').split(',') if s.strip()]
+        if files:
+            theme['files'] = files
         if args.start and args.end:
             theme['date_range_start'] = args.start
             theme['date_range_end'] = args.end
@@ -286,7 +406,7 @@ def main():
     if not theme.get('date_range_start') and not theme.get('sources') and not theme.get('files'):
         print(
             "ERROR: need date_range (--start/--end) and/or --sources "
-            "(name+month alone never matches files)",
+            "and/or --files (name+month alone never matches files)",
             file=sys.stderr,
         )
         sys.exit(1)

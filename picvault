@@ -534,37 +534,14 @@ cmd_theme() {
                 warn "No events.yaml"
                 return
             fi
-            echo ""
-            echo -e "${BOLD}Themes${NC}"
-            echo "─────────────────────────────────────────"
-            python3 -c "
-import yaml, sys
-try:
-    with open(sys.argv[1]) as f: data = yaml.safe_load(f) or {}
-    for t in data.get('themes', []):
-        print(f'  {t.get(\"name\", \"?\"):20s}  {t.get(\"month\", \"?\")}  sources={t.get(\"sources\", [])}')
-except Exception as e:
-    print(f'  (parse error: {e})')
-" "$events" 2>/dev/null || grep -A 2 "name:" "$events" | head -40
-            echo ""
+            python3 "$SCRIPTS_DIR/add_theme.py" --work "$WORK" --list
             ;;
         remove)
             local name="$1"
             [ -z "$name" ] && { err "Usage: picvault theme remove <name>"; return 1; }
             local events="$WORK/_meta/events.yaml"
             [ -f "$events" ] || { warn "No events.yaml"; return; }
-            python3 -c "
-import yaml, sys
-p = sys.argv[1]
-n = sys.argv[2]
-with open(p) as f: data = yaml.safe_load(f) or {}
-data['themes'] = [t for t in data.get('themes', []) if t.get('name') != n]
-with open(p, 'w') as f: yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
-" "$events" "$name"
-            ok "Removed theme: $name"
-            info "Config only — files in by-date/*_${name}/ stay until you sync:"
-            info "  picvault theme rebucket --theme ${name} [--yes]   # orphan bucket → default month"
-            info "  or: picvault theme rebucket --all [--yes]"
+            python3 "$SCRIPTS_DIR/add_theme.py" --work "$WORK" --remove "$name"
             ;;
         rebucket)
             local yes="" all="" themes=()
