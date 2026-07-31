@@ -102,6 +102,12 @@ def test_gallery_menu_counts_and_dismissal():
         'document.querySelectorAll(\'.jumps-more[open]\')' in js
         and 'if (!menu.contains(e.target)) menu.open = false;' in js,
     )
+    check(
+        'gallery shortcut nav replaces history between peers',
+        'function shouldReplaceGalleryShortcutNav' in js
+        and 'galleryShortcutPaths[currentPath]' in js
+        and 'window.location.replace(jumpLink.href)' in js,
+    )
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
         (work / 'by-date' / '2026' / '2026-07_海南' / 'photos').mkdir(parents=True)

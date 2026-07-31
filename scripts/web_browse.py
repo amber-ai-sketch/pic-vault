@@ -1952,6 +1952,33 @@ PAGE_JS = '''
     return lb.getAttribute('data-current-path') || '';
   }
 
+  var galleryShortcutPaths = {
+    '/starred': true,
+    '/screenshots': true,
+    '/screenrecords': true,
+    '/docs': true,
+    '/things': true,
+    '/themes': true
+  };
+
+  function normalizedSameOriginPath(href) {
+    try {
+      var url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin) return '';
+      return url.pathname.replace(/\\/+$/, '') || '/';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function shouldReplaceGalleryShortcutNav(link, e) {
+    if (!link || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return false;
+    if (e.button != null && e.button !== 0) return false;
+    var currentPath = normalizedSameOriginPath(window.location.href);
+    var targetPath = normalizedSameOriginPath(link.href || link.getAttribute('href') || '');
+    return !!(galleryShortcutPaths[currentPath] && galleryShortcutPaths[targetPath] && currentPath !== targetPath);
+  }
+
   function syncLightboxPick(path) {
     if (!lb) return;
     var cb = lb.querySelector('.lb-pick');
@@ -2169,6 +2196,12 @@ PAGE_JS = '''
     document.querySelectorAll('.jumps-more[open]').forEach(function (menu) {
       if (!menu.contains(e.target)) menu.open = false;
     });
+    var jumpLink = e.target.closest('.jumps-more-panel a[href]');
+    if (shouldReplaceGalleryShortcutNav(jumpLink, e)) {
+      e.preventDefault();
+      window.location.replace(jumpLink.href);
+      return;
+    }
     var star = e.target.closest('.star');
     if (star) {
       e.preventDefault();
