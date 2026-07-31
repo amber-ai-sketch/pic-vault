@@ -302,6 +302,11 @@ def test_star_api_and_lightbox_sync():
         'lightbox keys ignore typing targets',
         'function isTypingTarget' in js,
     )
+    check('lightbox has pick checkbox', 'class="lb-pick"' in js and '勾选' in js)
+    check('lightbox space picks and advances', 'function pickCurrentAndAdvance' in js and "e.code === 'Space'" in js)
+    check('lightbox pick syncs gallery cell', 'setPathPicked(path, true)' in js)
+    check('lightbox has single delete', 'function trashLightboxCurrent' in js and 'class="lb-trash"' in js)
+    check('lightbox delete posts one path', 'JSON.stringify({ paths: [path] })' in js)
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
@@ -1899,6 +1904,22 @@ def test_theme_remove_cli_without_yaml():
         check('theme remove preserves files', themes[0].get('files') == ['keep.jpg'])
 
 
+def test_home_empty_copy_says_normal_archive():
+    print('\n25d. Home empty copy distinguishes normal archive from screenshots')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        for name in ('by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta'):
+            (work / name).mkdir(parents=True)
+        for i in range(2):
+            (work / 'screenshots' / f'screenshot_{i}.jpg').write_bytes(b'x')
+        wb.clear_web_caches()
+        html = wb.render_home(work).decode('utf-8')
+        check('home empty copy says normal archive', '没有普通照片/视频归档' in html)
+        check('home empty copy omits pipeline hint', '把照片/视频放进收件箱后' not in html)
+        check('home empty copy keeps screenshot count separate', '截图<span class="n"> 2</span>' in html)
+
+
 def test_web_path_traversal_and_cors_hardening():
     """Star bucket /thumb /month fences + CORS + default host."""
     print('\n26. Web path traversal + CORS hardening')
@@ -2431,6 +2452,7 @@ def main():
     test_theme_start_month_reassign_and_validate()
     test_theme_add_files_cli_and_list()
     test_theme_remove_cli_without_yaml()
+    test_home_empty_copy_says_normal_archive()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()

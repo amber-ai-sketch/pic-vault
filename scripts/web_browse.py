@@ -1586,6 +1586,21 @@ body.select-mode .cell .fname {
   flex-shrink: 0;
   letter-spacing: 0.02em;
 }
+.lb-pick-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+.lb-pick {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink);
+}
 .lb-bar button,
 .lb-bar a {
   font-family: var(--sans);
@@ -1602,6 +1617,8 @@ body.select-mode .cell .fname {
 .lb-bar a:hover { background: var(--mist); }
 .lb-bar .star-lb { opacity: 1; color: var(--muted); text-shadow: none; position: static; width: auto; height: auto; }
 .lb-bar .star-lb.on { background: var(--ink); color: #fff; }
+.lb-bar .lb-trash { color: #8f1d1d; }
+.lb-bar .lb-trash.busy { opacity: 0.55; pointer-events: none; }
 
 .toast {
   position: fixed;
@@ -1906,6 +1923,44 @@ PAGE_JS = '''
     ).filter(Boolean);
   }
 
+  function cellForPath(path) {
+    if (!path) return null;
+    var thumb = document.querySelector(
+      '.cell [data-lightbox][data-path="' + CSS.escape(path) + '"]'
+    );
+    return thumb ? thumb.closest('.cell') : null;
+  }
+
+  function setPathPicked(path, on) {
+    var cell = cellForPath(path);
+    if (!cell) return false;
+    var pick = cell.querySelector('.pick');
+    if (!pick) return false;
+    pick.checked = !!on;
+    cell.classList.toggle('selected', !!on);
+    if (on && !document.body.classList.contains('select-mode')) {
+      setSelectMode(true);
+    } else {
+      syncSelCount();
+    }
+    syncLightboxPick(path);
+    return true;
+  }
+
+  function currentLightboxPath() {
+    if (!lb || !lb.classList.contains('open')) return '';
+    return lb.getAttribute('data-current-path') || '';
+  }
+
+  function syncLightboxPick(path) {
+    if (!lb) return;
+    var cb = lb.querySelector('.lb-pick');
+    if (!cb) return;
+    var cell = cellForPath(path || currentLightboxPath());
+    var pick = cell ? cell.querySelector('.pick') : null;
+    cb.checked = !!(pick && pick.checked);
+  }
+
   async function reclassify(action) {
     var paths = selectedPaths();
     if (!paths.length) {
@@ -1964,6 +2019,65 @@ PAGE_JS = '''
       setTimeout(function () { location.reload(); }, 500);
     } catch (err) {
       toast('网络错误：' + err);
+    }
+  }
+
+  async function trashLightboxCurrent(btn) {
+    var path = currentLightboxPath();
+    if (!path) {
+      toast('删除失败：缺少路径');
+      return;
+    }
+    if (btn && btn.classList.contains('busy')) return;
+    var cell = cellForPath(path);
+    var name = '';
+    if (cell) {
+      var thumb = cell.querySelector('[data-lightbox]');
+      name = thumb ? (thumb.getAttribute('data-name') || '') : '';
+    }
+    if (!confirm('删除当前文件？\n' + (name || path) + '\n\n会移到 _trash/（可找回，不是永久删除）。')) return;
+    var items = visibleLightboxThumbs();
+    var idx = 0;
+    for (var i = 0; i < items.length; i++) {
+      if ((items[i].getAttribute('data-path') || '') === path) {
+        idx = i;
+        break;
+      }
+    }
+    if (btn) btn.classList.add('busy');
+    try {
+      var r = await fetch('/api/trash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [path] })
+      });
+      var data = await r.json();
+      if (!data.ok) {
+        toast('删除失败：' + (data.error || 'unknown'));
+        return;
+      }
+      if (cell) {
+        if (cell.classList.contains('starred')) {
+          var sheet = gallerySheet();
+          var cur = sheet && sheet.getAttribute('data-star-total') != null
+            ? (parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0)
+            : document.querySelectorAll('.cell.starred').length;
+          setStarTotal(cur - 1);
+        }
+        cell.remove();
+      }
+      syncSelCount();
+      toast('已移入回收站：1 个');
+      var nextItems = visibleLightboxThumbs();
+      if (!nextItems.length) {
+        closeLightbox();
+      } else {
+        openLightbox(nextItems[Math.min(idx, nextItems.length - 1)]);
+      }
+    } catch (err) {
+      toast('网络错误：' + err);
+    } finally {
+      if (btn) btn.classList.remove('busy');
     }
   }
 
@@ -2039,6 +2153,11 @@ PAGE_JS = '''
   }
 
   document.addEventListener('change', function (e) {
+    var lbPick = e.target.closest('.lb-pick');
+    if (lbPick) {
+      setPathPicked(currentLightboxPath(), lbPick.checked);
+      return;
+    }
     var pick = e.target.closest('.pick');
     if (!pick) return;
     var cell = pick.closest('.cell');
@@ -2064,6 +2183,13 @@ PAGE_JS = '''
     }
     if (e.target.closest('.pick')) {
       e.stopPropagation();
+      return;
+    }
+    var lbTrash = e.target.closest('.lb-trash');
+    if (lbTrash) {
+      e.preventDefault();
+      e.stopPropagation();
+      trashLightboxCurrent(lbTrash);
       return;
     }
     var loadMore = e.target.closest('[data-load-more]');
@@ -2138,8 +2264,18 @@ PAGE_JS = '''
     openLightbox(items[idx]);
   }
 
+  function pickCurrentAndAdvance() {
+    var path = currentLightboxPath();
+    if (!path) return;
+    if (setPathPicked(path, true)) {
+      toast('已勾选，下一张');
+      stepLightbox(1);
+    }
+  }
+
   document.addEventListener('keydown', function (e) {
-    if (isTypingTarget(e.target)) return;
+    var onLightboxPick = e.target && e.target.closest && e.target.closest('.lb-pick');
+    if (isTypingTarget(e.target) && !onLightboxPick) return;
     if (e.key === 'Escape') {
       closeLightbox();
       return;
@@ -2151,6 +2287,9 @@ PAGE_JS = '''
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
       stepLightbox(1);
+    } else if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      pickCurrentAndAdvance();
     }
   });
 
@@ -2167,11 +2306,14 @@ PAGE_JS = '''
       lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
         '<span class="pos"></span>' +
         '<span class="nm"></span>' +
+        '<label class="lb-pick-wrap"><input type="checkbox" class="lb-pick">勾选</label>' +
         '<button type="button" class="star star-lb" title="加星">☆</button>' +
         '<a class="open-raw" href="#" target="_blank" rel="noopener">原图</a>' +
+        '<button type="button" class="lb-trash">删除</button>' +
         '<button type="button" id="lbClose">关闭</button></div>';
       document.body.appendChild(lb);
     }
+    lb.setAttribute('data-current-path', path);
     var media = lb.querySelector('.lb-media');
     media.innerHTML = '';
     if (isVideo) {
@@ -2201,6 +2343,7 @@ PAGE_JS = '''
     }
     var raw = lb.querySelector('.open-raw');
     raw.href = src;
+    syncLightboxPick(path);
     var starBtn = lb.querySelector('.star-lb');
     starBtn.setAttribute('data-path', path);
     starBtn.setAttribute('data-bucket', bucket);
@@ -2621,7 +2764,7 @@ def render_home(work: Path) -> bytes:
     if not rows:
         ledger = (
             '<div class="ledger"><div class="ledger-empty">'
-            '还没有归档。把照片放进收件箱后，到控制台跑流水线。'
+            '没有普通照片/视频归档'
             '</div></div>'
         )
     else:
