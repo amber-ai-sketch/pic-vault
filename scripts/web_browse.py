@@ -553,6 +553,7 @@ def scan_buckets(work: Path) -> dict:
         'screenrecords_count': 0,
         'docs_count': 0,
         'things_count': 0,
+        'themes_count': 0,
     }
 
     by_date = work / 'by-date'
@@ -569,6 +570,8 @@ def scan_buckets(work: Path) -> dict:
                 # Stars JSON is keyed by month bucket name (e.g. 2024-07_海南).
                 star_count = len(load_stars(work, month_dir.name))
                 is_themed = '_' in month_dir.name
+                if is_themed:
+                    result['themes_count'] += 1
                 theme_name = month_dir.name.split('_', 1)[1] if is_themed else ''
                 months.append({
                     'name': month_dir.name,
@@ -2044,6 +2047,9 @@ PAGE_JS = '''
   });
 
   document.addEventListener('click', function (e) {
+    document.querySelectorAll('.jumps-more[open]').forEach(function (menu) {
+      if (!menu.contains(e.target)) menu.open = false;
+    });
     var star = e.target.closest('.star');
     if (star) {
       e.preventDefault();
@@ -2254,8 +2260,10 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         records_n = int(buckets.get('screenrecords_count') or 0)
         docs_n = int(buckets.get('docs_count') or 0)
         things_n = int(buckets.get('things_count') or 0)
+        themes_n = int(buckets.get('themes_count') or 0)
     else:
         star_n = int(star_n or 0)
+        themes_n = 0
 
     def _jump(href: str, label: str, n: int = None) -> str:
         if n is None:
@@ -2271,7 +2279,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         _jump('/screenrecords', '录屏', records_n),
         _jump('/docs', '文档', docs_n),
         _jump('/things', '物品', things_n),
-        _jump('/themes', '主题'),
+        _jump('/themes', '主题', themes_n),
     ]
     jump_parts = [
         '<a href="#" id="consoleLink">控制台</a>',

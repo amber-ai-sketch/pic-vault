@@ -75,6 +75,23 @@ def test_dashboard_web_start_copy():
     check('open browse no longer new tab', "window.open('http://localhost:' + WEB_PORT + '/', '_blank')" not in text)
 
 
+def test_gallery_menu_counts_and_dismissal():
+    print('\n1c. Gallery menu shows theme count and closes on outside click')
+    js = wb.PAGE_JS
+    check(
+        'gallery menu outside click handler',
+        'document.querySelectorAll(\'.jumps-more[open]\')' in js
+        and 'if (!menu.contains(e.target)) menu.open = false;' in js,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        (work / 'by-date' / '2026' / '2026-07_海南' / 'photos').mkdir(parents=True)
+        (work / 'by-date' / '2026' / '2026-08').mkdir(parents=True)
+        (work / 'by-date' / '2025' / '2025-12_雪山' / 'videos').mkdir(parents=True)
+        html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
+        check('gallery menu theme count', '<span class="n"> 2</span>' in html and '>主题' in html)
+
+
 def test_picvault_web_port_state():
     print('\n1d. picvault web status uses persisted custom port')
     with tempfile.TemporaryDirectory() as tmp:
@@ -2313,6 +2330,7 @@ def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
     test_dashboard_web_start_copy()
+    test_gallery_menu_counts_and_dismissal()
     test_picvault_web_port_state()
     test_console_link_shows_dashboard_url()
     test_init_skeleton()
