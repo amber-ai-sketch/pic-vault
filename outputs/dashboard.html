@@ -1459,9 +1459,10 @@ let paths = {
 let PICVAULT = '';
 let CMDS = {};
 
-/** Resolve repo root from repo/outputs/dashboard.html (file:// or http with that path). */
+/** Resolve repo root from repo/outputs/dashboard.html; /dashboard uses server-provided root. */
 function detectProjectRoot() {
   try {
+    if (window.PICVAULT_PROJECT_ROOT) return window.PICVAULT_PROJECT_ROOT;
     let path = decodeURIComponent(location.pathname || '');
     // Windows file:// sometimes yields /C:/path.
     if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);

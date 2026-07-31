@@ -66,6 +66,21 @@ def dashboard_file_url() -> str:
     """file:// URL for outputs/dashboard.html (控制台)."""
     return DASHBOARD_HTML.resolve().as_uri()
 
+
+def render_dashboard_http() -> bytes:
+    """Serve outputs/dashboard.html from the Web UI origin for reliable new-tab open."""
+    html = DASHBOARD_HTML.read_text(encoding='utf-8')
+    injected = (
+        '<script>window.PICVAULT_PROJECT_ROOT = '
+        f'{json.dumps(str(PROJECT_ROOT), ensure_ascii=False)};'
+        '</script>'
+    )
+    if '<script>' in html:
+        html = html.replace('<script>', injected + '\n<script>', 1)
+    else:
+        html += injected
+    return html.encode('utf-8')
+
 EMPTY_EVENTS_YAML = """# 主题配置（rename_organize、Web、themes）
 # 也可用：./scripts/add_theme.py --interactive
 #
@@ -2731,7 +2746,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         _jump('/themes', '主题', themes_n),
     ]
     jump_parts = [
-        '<a href="#" id="consoleLink">控制台</a>',
+        '<a href="/dashboard" id="consoleLink" target="_blank" rel="noopener">控制台</a>',
         '<details class="jumps-more">'
         '<summary>图库</summary>'
         f'<div class="jumps-more-panel">{"".join(more_links)}</div>'
@@ -2744,48 +2759,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             f'<nav class="crumbs" aria-label="面包屑">{"".join(crumb_parts)}</nav>'
         )
 
-    # Server-known dashboard address (never claim browse origin is the console).
-    dash_fallback_js = json.dumps(dashboard_file_url(), ensure_ascii=False)
-    console_js = f'''
-(function () {{
-  var a = document.getElementById('consoleLink');
-  if (!a) return;
-  var dash = null;
-  try {{ dash = localStorage.getItem('picvault.dashboard.url'); }} catch (e) {{}}
-  var fallbackDash = {dash_fallback_js};
-  function showConsoleHint() {{
-    var url = (dash && String(dash).trim()) || fallbackDash || '';
-    var tip = '请打开控制台（outputs/dashboard.html）。从控制台点「打开浏览」进入本页后即可记住返回路径。';
-    if (!url) {{
-      alert(tip);
-      return;
-    }}
-    var done = function (copied) {{
-      var msg = tip + '\\n\\n控制台地址：\\n' + url;
-      if (copied) msg += '\\n\\n（已复制到剪贴板）';
-      // prompt 内输入框可选中，便于手动复制；clipboard 成功时再带提示。
-      if (window.prompt) {{
-        window.prompt(msg + (copied ? '' : '\\n\\n可全选下方地址复制：'), url);
-      }} else {{
-        alert(msg);
-      }}
-    }};
-    if (navigator.clipboard && navigator.clipboard.writeText) {{
-      navigator.clipboard.writeText(url).then(function () {{ done(true); }}, function () {{ done(false); }});
-    }} else {{
-      done(false);
-    }}
-  }}
-  if (dash) {{
-    a.href = dash;
-  }} else {{
-    a.addEventListener('click', function (e) {{
-      e.preventDefault();
-      showConsoleHint();
-    }});
-  }}
-}})();
-'''
+    console_js = ''
 
     doc = f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -3788,6 +3762,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/' or path == '/index.html':
                 body = render_home(self.work)
+                self._send(body, 'text/html')
+            elif path == '/dashboard':
+                body = render_dashboard_http()
                 self._send(body, 'text/html')
             elif path == '/by-date':
                 body = render_by_date_home(self.work)

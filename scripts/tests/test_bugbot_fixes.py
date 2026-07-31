@@ -298,20 +298,21 @@ def test_picvault_web_restart_clears_orphan_same_work_server():
 
 
 def test_console_link_shows_dashboard_url():
-    print('\n1c. Web UI 控制台 tip includes dashboard URL')
+    print('\n1c. Web UI 控制台 opens dashboard in a new tab')
     html = wb.page_shell('首页', '<p>x</p>', work=None).decode('utf-8')
-    dash_uri = wb.dashboard_file_url()
-    check('has 控制台 link', 'id="consoleLink">控制台</a>' in html)
-    check('embeds dashboard file URL', dash_uri in html)
-    check('labels 控制台地址', '控制台地址' in html)
+    check('has 控制台 link', '<a href="/dashboard" id="consoleLink"' in html)
+    check('console opens in new tab', 'target="_blank"' in html and 'rel="noopener"' in html)
+    check('no console prompt fallback', 'window.prompt' not in html and '控制台地址' not in html)
     check('no browse origin as console', "location.origin + '/'" not in html)
     check('no 当前访问地址 browse label', '当前访问地址' not in html)
-    check('clipboard copy attempt', 'navigator.clipboard.writeText' in html)
-    check('prompt for selectable URL', 'window.prompt' in html)
     check(
         'no old alert-only copy',
         "alert('请从控制台点「打开浏览」进入本页，或手动打开 outputs/dashboard.html')" not in html,
     )
+    check('dashboard route renderer exists', callable(getattr(wb, 'render_dashboard_http', None)))
+    dash_html = wb.render_dashboard_http().decode('utf-8')
+    check('dashboard route injects project root', 'window.PICVAULT_PROJECT_ROOT' in dash_html)
+    check('dashboard uses injected project root', 'if (window.PICVAULT_PROJECT_ROOT)' in dash_html)
 
 
 def test_init_skeleton():
