@@ -502,26 +502,29 @@
   .output-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
   }
 
   .output-card {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px 13px 13px;
-    background: #FAF8F3;
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--line);
+    gap: 10px;
+    min-width: 0;
+    padding: 13px 14px 15px;
+    background: var(--paper);
+    border: none;
+    border-top: 2px solid transparent;
   }
 
   .output-card.output-wide {
     grid-column: 1 / -1;
   }
 
-  .output-card.tone-live { border-left-color: var(--live); }
-  .output-card.tone-warn { border-left-color: var(--warn); }
-  .output-card.tone-hazard { border-left-color: var(--hazard); }
+  .output-card.tone-live { border-top-color: var(--live); }
+  .output-card.tone-warn { border-top-color: var(--warn); }
+  .output-card.tone-hazard { border-top-color: var(--hazard); }
 
   .output-card-head {
     display: flex;
@@ -537,6 +540,7 @@
     border: none;
     max-height: 360px;
     overflow: auto;
+    color: var(--ink);
   }
 
   .output-label {
@@ -791,10 +795,10 @@
   }
   #outputPanel h2 {
     font-family: var(--sans);
-    font-weight: 400;
-    font-size: 1.35rem;
+    font-weight: 500;
+    font-size: var(--text-md);
     margin: 0;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
   }
   #outputPanel .output-head {
     display: flex;
@@ -811,11 +815,17 @@
     font-family: var(--sans);
   }
   #outputPanel pre {
-    font-family: var(--mono);
+    font-family: var(--sans);
     font-size: var(--text-xs);
     white-space: pre-wrap;
+    word-break: break-word;
     margin: 0;
     border: none;
+    line-height: 1.55;
+  }
+  #outputPanel #outputCmd {
+    font-family: var(--mono);
+    line-height: 1.45;
   }
   #outputPanel .output-body {
     font-size: var(--text-sm);
@@ -852,14 +862,6 @@
   .output-shell #outputStderr {
     max-height: 320px;
     overflow: auto;
-  }
-
-  .footer-tip {
-    margin-top: 12px;
-    padding-top: 18px;
-    border-top: 1px solid var(--line);
-    font-size: var(--text-xs);
-    color: var(--muted);
   }
 
   .page-in {
@@ -1252,7 +1254,7 @@
       </div>
       <div class="output-empty" id="outputEmptyState">
         <p class="empty-lead">还没有运行记录</p>
-        <p class="empty-sub">先试跑或执行任一步；命令、进度、标准输出、错误输出都会回到这里，便于 Mac 上长任务回看。</p>
+        <p class="empty-sub">运行后会在这里保留命令、进度、标准输出和错误输出。</p>
       </div>
       <div class="output-grid" id="outputGrid" style="display:none">
         <section class="output-card output-wide">
@@ -1284,8 +1286,6 @@
       </div>
     </div>
   </section>
-
-  <p class="footer-tip">会改文件的操作会先确认｜先试跑，再执行</p>
 
     </main>
   </div>
