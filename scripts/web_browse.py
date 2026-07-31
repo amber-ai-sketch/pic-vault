@@ -66,6 +66,21 @@ def dashboard_file_url() -> str:
     """file:// URL for outputs/dashboard.html (控制台)."""
     return DASHBOARD_HTML.resolve().as_uri()
 
+
+def render_dashboard_http() -> bytes:
+    """Serve outputs/dashboard.html from the Web UI origin for reliable new-tab open."""
+    html = DASHBOARD_HTML.read_text(encoding='utf-8')
+    injected = (
+        '<script>window.PICVAULT_PROJECT_ROOT = '
+        f'{json.dumps(str(PROJECT_ROOT), ensure_ascii=False)};'
+        '</script>'
+    )
+    if '<script>' in html:
+        html = html.replace('<script>', injected + '\n<script>', 1)
+    else:
+        html += injected
+    return html.encode('utf-8')
+
 EMPTY_EVENTS_YAML = """# 主题配置（rename_organize、Web、themes）
 # 也可用：./scripts/add_theme.py --interactive
 #
@@ -254,6 +269,10 @@ def effective_run_timeout_sec():
 
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
+    # Match rename_organize / picvault: allow temp WORK roots in tests.
+    if os.environ.get('DUPEGURU_TEST') == '1' or os.environ.get('PICVAULT_TEST') == '1':
+        return Path(path_str).expanduser().resolve()
+
     p = Path(path_str).expanduser().resolve()
     for prefix in allowed_prefixes:
         prefix_resolved = str(Path(prefix).resolve())
@@ -512,18 +531,23 @@ def bucket_display_name(name: str) -> str:
 _CACHE_LOCK = threading.Lock()
 _TOPBAR_CACHE_TTL = 15.0
 _STATUS_COUNTS_TTL = 10.0
+_TRASH_COUNT_TTL = 10.0
 # work_key -> {'expires': float, 'sig': tuple, 'buckets': dict, 'star_n': int}
 _topbar_cache: dict = {}
 # work_key -> {'expires': float, 'sig': tuple, 'counts': dict}
 _status_counts_cache: dict = {}
+# work_key -> {'expires': float, 'sig': tuple, 'count': int}
+_trash_count_cache: dict = {}
 
 _TOPBAR_MTIME_ROOTS = (
     'by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta/stars',
+    '_meta/events.yaml',
 )
 _STATUS_MTIME_ROOTS = (
     'inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', 'things',
     '_vlogs', '_trash', '_meta/stars',
 )
+_TRASH_MTIME_ROOTS = ('_trash',)
 
 
 def _dir_mtime_sig(work: Path, roots: tuple) -> tuple:
@@ -543,6 +567,20 @@ def clear_web_caches():
     with _CACHE_LOCK:
         _topbar_cache.clear()
         _status_counts_cache.clear()
+        _trash_count_cache.clear()
+
+
+def count_configured_themes(work: Path) -> int:
+    """Count valid themes from _meta/events.yaml for UI labels."""
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        return 0
+    try:
+        themes = rename_mod.parse_events_yaml_text(path.read_text(encoding='utf-8'))
+        rename_mod.validate_events_themes(themes)
+    except Exception:
+        return 0
+    return len(themes)
 
 
 def scan_buckets(work: Path) -> dict:
@@ -553,6 +591,7 @@ def scan_buckets(work: Path) -> dict:
         'screenrecords_count': 0,
         'docs_count': 0,
         'things_count': 0,
+        'themes_count': count_configured_themes(work),
     }
 
     by_date = work / 'by-date'
@@ -664,6 +703,25 @@ def get_status_counts(work: Path) -> dict:
             'counts': counts,
         }
     return dict(counts)
+
+
+def get_trash_count(work: Path) -> int:
+    """Cached count for the home trash card without walking every folder."""
+    key = str(work.resolve()) if work.exists() else str(work)
+    now = time.monotonic()
+    sig = _dir_mtime_sig(work, _TRASH_MTIME_ROOTS)
+    with _CACHE_LOCK:
+        hit = _trash_count_cache.get(key)
+        if hit and hit['expires'] > now and hit['sig'] == sig:
+            return int(hit['count'])
+    count = count_files_in(work / '_trash')
+    with _CACHE_LOCK:
+        _trash_count_cache[key] = {
+            'expires': now + _TRASH_COUNT_TTL,
+            'sig': sig,
+            'count': count,
+        }
+    return int(count)
 
 def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Path]:
     """List files in a specific month/theme bucket.
@@ -826,6 +884,7 @@ def save_stars(work: Path, bucket: str, stars: dict):
     path = resolve_stars_path(work, bucket)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({k: True for k in stars}, indent=2, ensure_ascii=False))
+    clear_web_caches()
 
 
 def migrate_star_path(work: Path, old_rel: str, new_rel: str):
@@ -918,6 +977,8 @@ def trash_paths(work: Path, paths: list) -> list:
         except Exception as e:
             item['error'] = str(e)
         results.append(item)
+    if any(item.get('ok') for item in results):
+        clear_web_caches()
     return results
 
 
@@ -1056,8 +1117,8 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   right: 0;
   top: calc(100% + 8px);
   z-index: 30;
-  min-width: 10.5rem;
-  padding: 8px 0;
+  min-width: 13rem;
+  padding: 10px 0;
   background: var(--paper);
   border: 1px solid var(--line);
   box-shadow: 0 8px 24px rgba(0,0,0,0.06);
@@ -1069,11 +1130,12 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 14px;
+  padding: 9px 14px;
   color: var(--muted);
   text-decoration: none;
   white-space: nowrap;
 }
+.jumps-more-panel .jump-name { color: var(--ink); font-weight: 500; }
 .jumps-more-panel .n { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted); }
 .jumps-more-panel a:hover {
   background: var(--mist);
@@ -1120,6 +1182,80 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   text-transform: uppercase;
 }
 
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+.home-card {
+  min-height: 150px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+}
+.home-card[href]:hover {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.05);
+  text-decoration: none;
+}
+.home-card-primary {
+  grid-column: span 2;
+  background: var(--ink);
+  color: #fff;
+}
+.home-card-disabled {
+  background: var(--mist);
+  color: var(--muted);
+}
+.home-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.home-card-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.home-card-count {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.home-card-primary .home-card-count { color: rgba(255,255,255,0.72); }
+.home-card-desc {
+  margin: auto 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--muted);
+}
+.home-card-primary .home-card-desc { color: rgba(255,255,255,0.76); }
+.home-card-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: 1.55;
+}
+.home-card-primary .home-card-meta { color: rgba(255,255,255,0.72); }
+.home-card-go {
+  align-self: flex-end;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: inherit;
+}
+@media (max-width: 700px) {
+  .home-card-primary { grid-column: span 1; }
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1151,11 +1287,11 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .toolbar-organize {
   display: none;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
   width: 100%;
-  padding-top: 8px;
-  margin-top: 4px;
+  padding-top: 10px;
+  margin-top: 6px;
   border-top: 1px solid var(--line);
 }
 body.select-mode .toolbar-organize { display: flex; }
@@ -1189,7 +1325,8 @@ body.select-mode .toolbar-organize { display: flex; }
   color: var(--muted);
   margin-left: 4px;
 }
-.btn-reclass {
+.btn-reclass,
+.btn-bulk-star {
   font-family: var(--sans);
   font-weight: 500;
   font-size: var(--text-xs);
@@ -1201,8 +1338,10 @@ body.select-mode .toolbar-organize { display: flex; }
   cursor: pointer;
   transition: background .12s;
 }
-.btn-reclass:hover { background: var(--paper); }
-.btn-reclass:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-reclass:hover,
+.btn-bulk-star:hover { background: var(--paper); }
+.btn-reclass:disabled,
+.btn-bulk-star:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-trash {
   font-family: var(--sans);
   font-weight: 500;
@@ -1231,6 +1370,19 @@ body.select-mode .toolbar-organize { display: flex; }
   letter-spacing: 0.02em;
 }
 .toolbar .filter-tip::before { content: '说明：'; }
+.toolbar .review-tip {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  width: 100%;
+  margin: 2px 0 0;
+}
+.toolbar .review-tip kbd {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--mist);
+  padding: 1px 5px;
+}
 .gallery-more {
   display: flex;
   flex-direction: column;
@@ -1375,6 +1527,57 @@ body.select-mode .toolbar-organize { display: flex; }
   text-align: left;
   max-width: 28em;
 }
+.empty-card {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 30px 4px 34px;
+  max-width: 42rem;
+}
+.empty-kicker {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.empty-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.empty-text {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.7;
+}
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.empty-actions a,
+.empty-actions button {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+.empty-actions a.primary {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.empty-actions a:hover,
+.empty-actions button:hover { border-color: var(--ink); text-decoration: none; }
 
 .sheet {
   display: grid;
@@ -1496,7 +1699,7 @@ body.select-mode .cell .fname {
   height: 28px;
   border: none;
   border-radius: 0;
-  background: rgba(20,20,20,0.18);
+  background: rgba(20,20,20,0.28);
   color: rgba(255,255,255,0.88);
   text-shadow: 0 1px 2px rgba(0,0,0,0.35);
   cursor: pointer;
@@ -1507,7 +1710,7 @@ body.select-mode .cell .fname {
   padding: 0;
   transition: color .12s, background .12s, opacity .12s, transform .12s;
   z-index: 2;
-  opacity: 0.55;
+  opacity: 0.76;
 }
 .cell:hover .star,
 .star.on,
@@ -1556,25 +1759,25 @@ body.select-mode .cell .fname {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto auto auto;
+  gap: 10px 14px;
   align-items: center;
   background: rgba(255,255,255,0.92);
   border: none;
-  padding: 10px 14px;
-  font-family: var(--mono);
+  padding: 12px 14px;
+  font-family: var(--sans);
   font-size: var(--text-xs);
   color: var(--ink);
-  max-width: 90vw;
-  flex-wrap: wrap;
-  justify-content: center;
+  width: min(980px, calc(100vw - 40px));
 }
+.lb-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .lb-bar .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 42vw;
   min-width: 0;
+  color: var(--ink);
 }
 .lb-bar .pos {
   font-family: var(--mono);
@@ -1582,6 +1785,29 @@ body.select-mode .cell .fname {
   color: var(--muted);
   flex-shrink: 0;
   letter-spacing: 0.02em;
+}
+.lb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.lb-group:first-of-type { border-left: none; padding-left: 0; }
+.lb-pick-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+.lb-pick {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink);
 }
 .lb-bar button,
 .lb-bar a {
@@ -1599,6 +1825,12 @@ body.select-mode .cell .fname {
 .lb-bar a:hover { background: var(--mist); }
 .lb-bar .star-lb { opacity: 1; color: var(--muted); text-shadow: none; position: static; width: auto; height: auto; }
 .lb-bar .star-lb.on { background: var(--ink); color: #fff; }
+.lb-bar .lb-trash { color: #8f1d1d; }
+.lb-bar .lb-trash.busy { opacity: 0.55; pointer-events: none; }
+@media (max-width: 900px) {
+  .lb-bar { grid-template-columns: 1fr; align-items: stretch; }
+  .lb-group { border-left: none; padding-left: 0; flex-wrap: wrap; }
+}
 
 .toast {
   position: fixed;
@@ -1754,7 +1986,7 @@ body.select-mode .cell .fname {
   .star.pulse { animation: none; }
   .page-in { animation: none; }
   html { scroll-behavior: auto; }
-  .chip, .btn-reclass, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
+  .chip, .btn-reclass, .btn-bulk-star, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
 
 '''
@@ -1891,7 +2123,7 @@ PAGE_JS = '''
         document.body.classList.contains('select-mode') ? '已选 0 个，先勾选缩略图' : ''
       );
     }
-    document.querySelectorAll('.btn-reclass, .btn-trash').forEach(function (b) {
+    document.querySelectorAll('.btn-reclass, .btn-bulk-star, .btn-trash').forEach(function (b) {
       b.disabled = n === 0;
     });
   }
@@ -1901,6 +2133,128 @@ PAGE_JS = '''
       document.querySelectorAll('.cell.selected .pick'),
       function (cb) { return cb.getAttribute('data-path'); }
     ).filter(Boolean);
+  }
+
+  function cellForPath(path) {
+    if (!path) return null;
+    var thumb = document.querySelector(
+      '.cell [data-lightbox][data-path="' + CSS.escape(path) + '"]'
+    );
+    return thumb ? thumb.closest('.cell') : null;
+  }
+
+  function setPathPicked(path, on) {
+    var cell = cellForPath(path);
+    if (!cell) return false;
+    var pick = cell.querySelector('.pick');
+    if (!pick) return false;
+    pick.checked = !!on;
+    cell.classList.toggle('selected', !!on);
+    if (on && !document.body.classList.contains('select-mode')) {
+      setSelectMode(true);
+    } else {
+      syncSelCount();
+    }
+    syncLightboxPick(path);
+    return true;
+  }
+
+  function currentLightboxPath() {
+    if (!lb || !lb.classList.contains('open')) return '';
+    return lb.getAttribute('data-current-path') || '';
+  }
+
+  var galleryShortcutPaths = {
+    '/by-date': true,
+    '/starred': true,
+    '/screenshots': true,
+    '/screenrecords': true,
+    '/docs': true,
+    '/things': true,
+    '/themes': true
+  };
+
+  function normalizedSameOriginPath(href) {
+    try {
+      var url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin) return '';
+      return url.pathname.replace(/\\/+$/, '') || '/';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function shouldReplaceGalleryShortcutNav(link, e) {
+    if (!link || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return false;
+    if (e.button != null && e.button !== 0) return false;
+    var currentPath = normalizedSameOriginPath(window.location.href);
+    var targetPath = normalizedSameOriginPath(link.href || link.getAttribute('href') || '');
+    return !!(galleryShortcutPaths[currentPath] && galleryShortcutPaths[targetPath] && currentPath !== targetPath);
+  }
+
+  function syncLightboxPick(path) {
+    if (!lb) return;
+    var cb = lb.querySelector('.lb-pick');
+    if (!cb) return;
+    var cell = cellForPath(path || currentLightboxPath());
+    var pick = cell ? cell.querySelector('.pick') : null;
+    cb.checked = !!(pick && pick.checked);
+  }
+
+  async function starSelected() {
+    var cells = Array.prototype.slice.call(document.querySelectorAll('.cell.selected'));
+    if (!cells.length) {
+      toast('请先点「批量选择」，再勾选文件');
+      return;
+    }
+    var targets = cells.map(function (cell) {
+      var star = cell.querySelector('.star[data-path][data-bucket]');
+      return star ? {
+        path: star.getAttribute('data-path'),
+        bucket: star.getAttribute('data-bucket'),
+        already: star.classList.contains('on')
+      } : null;
+    }).filter(function (x) { return x && x.path && x.bucket; });
+    var toAdd = targets.filter(function (x) { return !x.already; });
+    if (!targets.length) {
+      toast('没有可加星的文件');
+      return;
+    }
+    if (!toAdd.length) {
+      toast('已选文件都已加星');
+      return;
+    }
+    try {
+      var added = 0;
+      for (var i = 0; i < toAdd.length; i++) {
+        var item = toAdd[i];
+        var r = await fetch('/api/star', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: item.path, bucket: item.bucket, action: 'on' })
+        });
+        var data = await r.json();
+        if (!data.ok) {
+          toast('加星失败：' + (data.error || item.path));
+          return;
+        }
+        if (data.starred) {
+          applyStarState(item.path, true);
+          added += 1;
+        }
+      }
+      var sheet = gallerySheet();
+      if (sheet && sheet.getAttribute('data-star-total') != null) {
+        var cur = parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0;
+        setStarTotal(cur + added);
+      } else {
+        syncStarCount();
+      }
+      applyFilter();
+      toast('已加星：' + added + ' 个');
+    } catch (err) {
+      toast('网络错误：' + err);
+    }
   }
 
   async function reclassify(action) {
@@ -1961,6 +2315,65 @@ PAGE_JS = '''
       setTimeout(function () { location.reload(); }, 500);
     } catch (err) {
       toast('网络错误：' + err);
+    }
+  }
+
+  async function trashLightboxCurrent(btn) {
+    var path = currentLightboxPath();
+    if (!path) {
+      toast('删除失败：缺少路径');
+      return;
+    }
+    if (btn && btn.classList.contains('busy')) return;
+    var cell = cellForPath(path);
+    var name = '';
+    if (cell) {
+      var thumb = cell.querySelector('[data-lightbox]');
+      name = thumb ? (thumb.getAttribute('data-name') || '') : '';
+    }
+    if (!confirm('删除当前文件？\\n' + (name || path) + '\\n\\n会移到 _trash/（可找回，不是永久删除）。')) return;
+    var items = visibleLightboxThumbs();
+    var idx = 0;
+    for (var i = 0; i < items.length; i++) {
+      if ((items[i].getAttribute('data-path') || '') === path) {
+        idx = i;
+        break;
+      }
+    }
+    if (btn) btn.classList.add('busy');
+    try {
+      var r = await fetch('/api/trash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [path] })
+      });
+      var data = await r.json();
+      if (!data.ok) {
+        toast('删除失败：' + (data.error || 'unknown'));
+        return;
+      }
+      if (cell) {
+        if (cell.classList.contains('starred')) {
+          var sheet = gallerySheet();
+          var cur = sheet && sheet.getAttribute('data-star-total') != null
+            ? (parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0)
+            : document.querySelectorAll('.cell.starred').length;
+          setStarTotal(cur - 1);
+        }
+        cell.remove();
+      }
+      syncSelCount();
+      toast('已移入回收站：1 个');
+      var nextItems = visibleLightboxThumbs();
+      if (!nextItems.length) {
+        closeLightbox();
+      } else {
+        openLightbox(nextItems[Math.min(idx, nextItems.length - 1)]);
+      }
+    } catch (err) {
+      toast('网络错误：' + err);
+    } finally {
+      if (btn) btn.classList.remove('busy');
     }
   }
 
@@ -2050,6 +2463,11 @@ PAGE_JS = '''
   }
 
   document.addEventListener('change', function (e) {
+    var lbPick = e.target.closest('.lb-pick');
+    if (lbPick) {
+      setPathPicked(currentLightboxPath(), lbPick.checked);
+      return;
+    }
     var pick = e.target.closest('.pick');
     if (!pick) return;
     var cell = pick.closest('.cell');
@@ -2058,6 +2476,15 @@ PAGE_JS = '''
   });
 
   document.addEventListener('click', function (e) {
+    document.querySelectorAll('.jumps-more[open]').forEach(function (menu) {
+      if (!menu.contains(e.target)) menu.open = false;
+    });
+    var jumpLink = e.target.closest('.jumps-more-panel a[href]');
+    if (shouldReplaceGalleryShortcutNav(jumpLink, e)) {
+      e.preventDefault();
+      window.location.replace(jumpLink.href);
+      return;
+    }
     var star = e.target.closest('.star');
     if (star) {
       e.preventDefault();
@@ -2074,6 +2501,13 @@ PAGE_JS = '''
       e.stopPropagation();
       return;
     }
+    var lbTrash = e.target.closest('.lb-trash');
+    if (lbTrash) {
+      e.preventDefault();
+      e.stopPropagation();
+      trashLightboxCurrent(lbTrash);
+      return;
+    }
     var loadMore = e.target.closest('[data-load-more]');
     if (loadMore) {
       e.preventDefault();
@@ -2084,6 +2518,12 @@ PAGE_JS = '''
     if (re) {
       e.preventDefault();
       reclassify(re.getAttribute('data-reclassify'));
+      return;
+    }
+    var bulkStar = e.target.closest('[data-bulk-star]');
+    if (bulkStar) {
+      e.preventDefault();
+      starSelected();
       return;
     }
     var trashBtn = e.target.closest('[data-trash]');
@@ -2146,8 +2586,18 @@ PAGE_JS = '''
     openLightbox(items[idx]);
   }
 
+  function pickCurrentAndAdvance() {
+    var path = currentLightboxPath();
+    if (!path) return;
+    if (setPathPicked(path, true)) {
+      toast('已勾选，下一张');
+      stepLightbox(1);
+    }
+  }
+
   document.addEventListener('keydown', function (e) {
-    if (isTypingTarget(e.target)) return;
+    var onLightboxPick = e.target && e.target.closest && e.target.closest('.lb-pick');
+    if (isTypingTarget(e.target) && !onLightboxPick) return;
     if (e.key === 'Escape') {
       closeLightbox();
       return;
@@ -2159,6 +2609,9 @@ PAGE_JS = '''
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
       stepLightbox(1);
+    } else if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      pickCurrentAndAdvance();
     }
   });
 
@@ -2173,13 +2626,16 @@ PAGE_JS = '''
       lb = document.createElement('div');
       lb.className = 'lb';
       lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
-        '<span class="pos"></span>' +
-        '<span class="nm"></span>' +
-        '<button type="button" class="star star-lb" title="加星">☆</button>' +
-        '<a class="open-raw" href="#" target="_blank" rel="noopener">原图</a>' +
-        '<button type="button" id="lbClose">关闭</button></div>';
+        '<div class="lb-meta"><span class="pos"></span><span class="nm"></span></div>' +
+        '<div class="lb-group"><label class="lb-pick-wrap"><input type="checkbox" class="lb-pick">勾选</label>' +
+        '<button type="button" class="star star-lb" title="加入加星">☆ 加星</button></div>' +
+        '<div class="lb-group"><a class="open-raw" href="#" target="_blank" rel="noopener">查看原图</a></div>' +
+        '<div class="lb-group">' +
+        '<button type="button" class="lb-trash">移至回收站</button>' +
+        '<button type="button" id="lbClose">关闭</button></div></div>';
       document.body.appendChild(lb);
     }
+    lb.setAttribute('data-current-path', path);
     var media = lb.querySelector('.lb-media');
     media.innerHTML = '';
     if (isVideo) {
@@ -2209,6 +2665,7 @@ PAGE_JS = '''
     }
     var raw = lb.querySelector('.open-raw');
     raw.href = src;
+    syncLightboxPick(path);
     var starBtn = lb.querySelector('.star-lb');
     starBtn.setAttribute('data-path', path);
     starBtn.setAttribute('data-bucket', bucket);
@@ -2255,7 +2712,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             crumb_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
 
     # Counts for top jumps (avoid repeating a footer link dump on home)
-    shots_n = records_n = docs_n = things_n = 0
+    by_date_n = shots_n = records_n = docs_n = things_n = 0
     if work is not None:
         if buckets is None or star_n is None:
             cached_star, cached_buckets = get_topbar_stats(work)
@@ -2264,31 +2721,36 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             if buckets is None:
                 buckets = cached_buckets
         star_n = int(star_n or 0)
+        totals = _by_date_totals(buckets)
+        by_date_n = totals['photos'] + totals['videos']
         shots_n = int(buckets.get('screenshots_count') or 0)
         records_n = int(buckets.get('screenrecords_count') or 0)
         docs_n = int(buckets.get('docs_count') or 0)
         things_n = int(buckets.get('things_count') or 0)
+        themes_n = int(buckets.get('themes_count') or 0)
     else:
         star_n = int(star_n or 0)
+        themes_n = 0
 
     def _jump(href: str, label: str, n: int = None) -> str:
         if n is None:
             return f'<a href="{_esc(href)}">{_esc(label)}</a>'
         return (
-            f'<a href="{_esc(href)}">{_esc(label)}'
-            f'<span class="n"> {n}</span></a>'
+            f'<a href="{_esc(href)}"><span class="jump-name">{_esc(label)}</span>'
+            f'<span class="n">{int(n)} 项</span></a>'
         )
 
     more_links = [
+        _jump('/by-date', '按日期', by_date_n),
         _jump('/starred', '加星', star_n),
         _jump('/screenshots', '截图', shots_n),
         _jump('/screenrecords', '录屏', records_n),
         _jump('/docs', '文档', docs_n),
         _jump('/things', '物品', things_n),
-        _jump('/themes', '主题'),
+        _jump('/themes', '主题', themes_n),
     ]
     jump_parts = [
-        '<a href="#" id="consoleLink">控制台</a>',
+        '<a href="/dashboard" id="consoleLink" target="_blank" rel="noopener">控制台</a>',
         '<details class="jumps-more">'
         '<summary>图库</summary>'
         f'<div class="jumps-more-panel">{"".join(more_links)}</div>'
@@ -2301,48 +2763,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             f'<nav class="crumbs" aria-label="面包屑">{"".join(crumb_parts)}</nav>'
         )
 
-    # Server-known dashboard address (never claim browse origin is the console).
-    dash_fallback_js = json.dumps(dashboard_file_url(), ensure_ascii=False)
-    console_js = f'''
-(function () {{
-  var a = document.getElementById('consoleLink');
-  if (!a) return;
-  var dash = null;
-  try {{ dash = localStorage.getItem('picvault.dashboard.url'); }} catch (e) {{}}
-  var fallbackDash = {dash_fallback_js};
-  function showConsoleHint() {{
-    var url = (dash && String(dash).trim()) || fallbackDash || '';
-    var tip = '请打开控制台（outputs/dashboard.html）。从控制台点「打开浏览」进入本页后即可记住返回路径。';
-    if (!url) {{
-      alert(tip);
-      return;
-    }}
-    var done = function (copied) {{
-      var msg = tip + '\\n\\n控制台地址：\\n' + url;
-      if (copied) msg += '\\n\\n（已复制到剪贴板）';
-      // prompt 内输入框可选中，便于手动复制；clipboard 成功时再带提示。
-      if (window.prompt) {{
-        window.prompt(msg + (copied ? '' : '\\n\\n可全选下方地址复制：'), url);
-      }} else {{
-        alert(msg);
-      }}
-    }};
-    if (navigator.clipboard && navigator.clipboard.writeText) {{
-      navigator.clipboard.writeText(url).then(function () {{ done(true); }}, function () {{ done(false); }});
-    }} else {{
-      done(false);
-    }}
-  }}
-  if (dash) {{
-    a.href = dash;
-  }} else {{
-    a.addEventListener('click', function (e) {{
-      e.preventDefault();
-      showConsoleHint();
-    }});
-  }}
-}})();
-'''
+    console_js = ''
 
     doc = f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2377,7 +2798,7 @@ def html_error_page(title: str, message: str) -> bytes:
     body = (
         f'<div class="page-head"><h2 class="page-title">{_esc(title)}</h2></div>'
         f'<div class="ledger"><div class="ledger-empty">{_esc(message)} '
-        f'<a href="/">回到归档</a></div></div>'
+        f'<a href="/">回到图库</a></div></div>'
     )
     return page_shell(title, body, work=None, crumbs=[('首页', '/'), (title, '#')])
 
@@ -2427,6 +2848,11 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
                      paginated: bool = False) -> str:
     """context: normal | theme | screen | docs | things — hide the button for the current bucket."""
     actions = []
+    if context != 'starred':
+        actions.append(
+            '<button type="button" class="btn-bulk-star" data-bulk-star="1" disabled>'
+            '加星</button>'
+        )
     if context == 'theme':
         actions.append(
             '<button type="button" class="btn-reclass" data-reclassify="to_default_month" disabled>'
@@ -2466,6 +2892,11 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
             '<button type="button" class="chip" data-filter="starred">'
             f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
         )
+    review_tip = (
+        '<p class="review-tip">打开预览后按 <kbd>空格</kbd> 勾选当前并进入下一张；'
+        '加星、原图和删除仍可单独操作。</p>'
+        if file_count else ''
+    )
     return (
         f'<div class="toolbar">'
         f'<span class="count">文件 {file_count}｜'
@@ -2481,7 +2912,28 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         f'<span class="sel-count" id="selCount"></span>'
         f'{"".join(actions)}'
         f'</div>'
+        f'{review_tip}'
         f'</div>'
+    )
+
+
+def _empty_state(title: str, text: str, actions: list[tuple[str, str, bool]] = None,
+                 kicker: str = '当前为空') -> str:
+    actions = actions or []
+    action_html = ''
+    if actions:
+        links = []
+        for label, href, primary in actions:
+            cls = ' class="primary"' if primary else ''
+            links.append(f'<a{cls} href="{_esc(href)}">{_esc(label)}</a>')
+        action_html = f'<div class="empty-actions">{"".join(links)}</div>'
+    return (
+        '<div class="empty-card">'
+        f'<p class="empty-kicker">{_esc(kicker)}</p>'
+        f'<h3 class="empty-title">{_esc(title)}</h3>'
+        f'<p class="empty-text">{_esc(text)}</p>'
+        f'{action_html}'
+        '</div>'
     )
 
 
@@ -2505,13 +2957,16 @@ def _gallery_sheet_html(
     year: str = None,
     month: str = None,
     empty_message: str = '这个桶里还没有文件。',
+    empty_text: str = None,
+    empty_actions: list[tuple[str, str, bool]] = None,
 ) -> str:
     """First page of a gallery sheet + optional「加载更多」footer."""
     total = len(entries)
     if total == 0:
-        return (
-            f'<div class="ledger"><div class="ledger-empty">{_esc(empty_message)}'
-            f'</div></div>'
+        return _empty_state(
+            empty_message,
+            empty_text or '这里不会自动生成内容；完成对应步骤或从图库手动移入后会出现。',
+            empty_actions or [('回到图库', '/', False)],
         )
     page = entries[:GALLERY_PAGE_SIZE]
     loaded = len(page)
@@ -2592,7 +3047,89 @@ def build_gallery_page_payload(
     }
 
 
+def _by_date_totals(buckets: dict) -> dict:
+    years = buckets.get('years') or {}
+    months = [m for year_months in years.values() for m in year_months]
+    return {
+        'years': len(years),
+        'months': sum(1 for m in months if not m.get('is_themed')),
+        'themes': sum(1 for m in months if m.get('is_themed')),
+        'photos': sum(int(m.get('photos') or 0) for m in months),
+        'videos': sum(int(m.get('videos') or 0) for m in months),
+        'stars': sum(int(m.get('stars') or 0) for m in months),
+        'lives': sum(int(m.get('lives') or 0) for m in months),
+    }
+
+
+def _home_card(label: str, count: int, desc: str, href: str = None,
+               meta: str = '', primary: bool = False) -> str:
+    cls = 'home-card home-card-primary' if primary else 'home-card'
+    if href:
+        tag = 'a'
+        attrs = f' href="{_esc(href)}"'
+        go = '<span class="home-card-go" aria-hidden="true">›</span>'
+    else:
+        tag = 'div'
+        cls += ' home-card-disabled'
+        attrs = ' aria-disabled="true"'
+        go = ''
+    meta_html = f'<div class="home-card-meta">{_esc(meta)}</div>' if meta else ''
+    return (
+        f'<{tag} class="{cls}"{attrs}>'
+        f'<div class="home-card-top">'
+        f'<span class="home-card-name">{_esc(label)}</span>'
+        f'<span class="home-card-count">{int(count)} 项</span>'
+        f'</div>'
+        f'<p class="home-card-desc">{_esc(desc)}</p>'
+        f'{meta_html}'
+        f'{go}'
+        f'</{tag}>'
+    )
+
+
+def _by_date_home_meta(totals: dict) -> str:
+    parts = []
+    if int(totals.get('years') or 0):
+        parts.append(f"{int(totals.get('years') or 0)} 年")
+    if int(totals.get('months') or 0):
+        parts.append(f"{int(totals.get('months') or 0)} 个月")
+    if int(totals.get('themes') or 0):
+        parts.append(f"{int(totals.get('themes') or 0)} 个主题")
+    return '｜'.join(parts)
+
+
 def render_home(work: Path) -> bytes:
+    star_n, buckets = get_topbar_stats(work)
+    totals = _by_date_totals(buckets)
+    by_date_n = totals['photos'] + totals['videos']
+    trash_n = get_trash_count(work)
+    by_date_meta = _by_date_home_meta(totals)
+    has_main_gallery = by_date_n > 0
+    cards = [
+        _home_card('按日期', by_date_n, '按拍摄时间浏览', '/by-date', by_date_meta, primary=has_main_gallery),
+        _home_card('加星', star_n, '所有已加星的照片和视频', '/starred'),
+        _home_card('截图', buckets.get('screenshots_count') or 0, '截图集中清理和复核', '/screenshots'),
+        _home_card('录屏', buckets.get('screenrecords_count') or 0, '屏幕录制视频集中回看', '/screenrecords'),
+        _home_card('文档', buckets.get('docs_count') or 0, '证件、票据和纸面信息', '/docs'),
+        _home_card('物品', buckets.get('things_count') or 0, '设备、包装和物件记录', '/things'),
+        _home_card('主题', buckets.get('themes_count') or 0, '旅行和事件的主题桶配置', '/themes'),
+        _home_card('回收站', trash_n, '软删除暂存，不参与备份。'),
+    ]
+    body = (
+        '<div class="page-head">'
+        '<div>'
+        '<h2 class="page-title">图库</h2>'
+        '<p class="page-lede">选择一个入口继续浏览、加星或整理。</p>'
+        '</div>'
+        '</div>'
+        f'<section class="home-grid" aria-label="图库文件夹">{"".join(cards)}</section>'
+    )
+    return page_shell(
+        '图库', body, work=work, crumbs=[], buckets=buckets, star_n=star_n,
+    )
+
+
+def render_by_date_home(work: Path) -> bytes:
     # One cached scan for ledger + topbar (page_shell reuses buckets/star_n).
     star_n, buckets = get_topbar_stats(work)
     years = sorted(buckets['years'].keys(), reverse=True)
@@ -2625,10 +3162,10 @@ def render_home(work: Path) -> bytes:
             f'</a>'
         )
     if not rows:
-        ledger = (
-            '<div class="ledger"><div class="ledger-empty">'
-            '还没有归档。把照片放进收件箱后，到控制台跑流水线。'
-            '</div></div>'
+        ledger = _empty_state(
+            '还没有按拍摄日期归档的照片或视频',
+            '把素材放进 inbox 后，回到控制台执行“重命名并归档”；完成后会按拍摄时间出现在这里。',
+            [('回到图库', '/', False)],
         )
     else:
         ledger = f'<div class="ledger">{"".join(rows)}</div>'
@@ -2636,14 +3173,16 @@ def render_home(work: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<div>'
-        f'<h2 class="page-title">归档</h2>'
-        f'<p class="page-lede">按年份进入，再查看月份或主题桶。</p>'
+        f'<h2 class="page-title">按日期</h2>'
+        f'<p class="page-lede">先选年份，再查看月份或主题</p>'
         f'</div>'
         f'</div>'
         f'{ledger}'
     )
     return page_shell(
-        '归档', body, work=work, crumbs=[], buckets=buckets, star_n=star_n,
+        '按日期', body, work=work,
+        crumbs=[('首页', '/'), ('按日期', '/by-date')],
+        buckets=buckets, star_n=star_n,
     )
 
 
@@ -2652,9 +3191,12 @@ def render_year(work: Path, year: str) -> bytes:
     if not by_date.exists():
         body = (
             f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
-            f'<div class="ledger"><div class="ledger-empty">未找到该年份。</div></div>'
+            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到图库", "/", False)])}'
         )
-        return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
+        return page_shell(
+            year, body, work=work,
+            crumbs=[('首页', '/'), ('按日期', '/by-date'), (year, f'/y/{year}')],
+        )
 
     months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
     filled_rows = []
@@ -2692,15 +3234,25 @@ def render_year(work: Path, year: str) -> bytes:
             filled_rows.append(row)
 
     rows = filled_rows + empty_rows
-    ledger_inner = ''.join(rows) if rows else '<div class="ledger-empty">空年份</div>'
+    if rows:
+        ledger = f'<div class="ledger">{"".join(rows)}</div>'
+    else:
+        ledger = _empty_state(
+            '这个年份还没有文件',
+            '月份目录存在，但还没有可浏览的照片或视频。整理归档后再回来查看。',
+            [('回到图库', '/', False)],
+        )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">{_esc(year)}</h2>'
         f'<p class="page-meta">{len(months)} 个入口</p>'
         f'</div>'
-        f'<div class="ledger">{ledger_inner}</div>'
+        f'{ledger}'
     )
-    return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
+    return page_shell(
+        year, body, work=work,
+        crumbs=[('首页', '/'), ('按日期', '/by-date'), (year, f'/y/{year}')],
+    )
 
 
 def theme_ledger_sub(theme: dict) -> str:
@@ -2756,7 +3308,9 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='bucket',
         year=year, month=month,
-        empty_message='这个桶里还没有文件。',
+        empty_message='这个入口还没有文件',
+        empty_text='归档后，文件会按拍摄时间进入默认月桶；主题桶需要先配置主题，再执行主题同步。',
+        empty_actions=[('回到图库', '/', False)],
     )
     meta = year
     if is_themed:
@@ -2779,6 +3333,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         work=work,
         crumbs=[
             ('首页', '/'),
+            ('按日期', '/by-date'),
             (year, f'/y/{year}'),
             (display, f'/y/{year}/{urllib.parse.quote(month)}'),
         ],
@@ -2791,12 +3346,14 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='screenshots',
-        empty_message='没有截图。',
+        empty_message='还没有截图',
+        empty_text='截图会在整理归档时从 inbox 分出来。归档完成后，这里适合集中清理和快速复核。',
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
-        f'<p class="page-meta">截图从归档中分出，适合快速清理。</p>'
+        f'<p class="page-meta">截图单独分出，适合快速清理和复核。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -2815,12 +3372,14 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='screenrecords',
-        empty_message='没有录屏。',
+        empty_message='还没有录屏',
+        empty_text='屏幕录制会在整理归档时进入这里。之后可以在预览里播放、勾选或移至回收站。',
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">录屏</h2>'
-        f'<p class="page-meta">录屏集中在这里，方便回看和删除。</p>'
+        f'<p class="page-meta">录屏集中在这里，方便回看和清理。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -2839,12 +3398,14 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='docs',
-        empty_message='没有文档照片。',
+        empty_message='还没有文档照片',
+        empty_text='证件、票据和纸面信息需要从任意图库批量选择后手动移入。移入后方便集中查看。',
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">文档</h2>'
-        f'<p class="page-meta">证件、票据和纸面信息，需要从图库手动移入。</p>'
+        f'<p class="page-meta">证件、票据和纸面信息，从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated)}'
         f'{sheet}'
@@ -2863,12 +3424,14 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='things',
-        empty_message='没有物品照片。',
+        empty_message='还没有物品照片',
+        empty_text='设备、包装和物件记录需要从任意图库批量选择后手动移入。适合保存型号、标签和外观。',
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">物品</h2>'
-        f'<p class="page-meta">设备、包装和物件记录，需要从图库手动移入。</p>'
+        f'<p class="page-meta">设备、包装和物件记录，从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated)}'
         f'{sheet}'
@@ -2888,12 +3451,14 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='starred',
-        empty_message='还没有加星。回到任意图库，点缩略图右上角的星标。',
+        empty_message='还没有加星内容',
+        empty_text='回到任意图库，点缩略图右上角的星标；预览时也可以用底部的加星按钮。',
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">加星</h2>'
-        f'<p class="page-meta">已加星 {len(entries)} 个；这里汇总所有桶里的精选。</p>'
+        f'<p class="page-meta">已加星 {len(entries)} 个，汇总所有桶里的精选。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated)}'
         f'{sheet}'
@@ -2917,12 +3482,14 @@ _HIDDEN_DIR_NOISE = frozenset({
 
 
 def is_user_media_file(path: Path) -> bool:
-    """True for countable media/docs files (excludes .DS_Store and most dotfiles)."""
+    """True for countable photo/video files (excludes .DS_Store and dotfiles)."""
     if not path.is_file():
         return False
     if path.name == '.DS_Store':
         return False
     if path.name.startswith('.') and path.name != '.source':
+        return False
+    if not rename_mod.is_media_file(path):
         return False
     return True
 
@@ -2931,6 +3498,7 @@ def count_files_in(dir_path: Path) -> int:
     """Count user-visible files under dir_path (aligned with rename_organize.scan_inbox).
 
     Skipped:
+      - files that are not recognized photos/videos
       - any file named exactly .DS_Store
       - any file whose name starts with '.' except '.source' (sidecar);
         Android '.trashed-*' / similar recycle noise is excluded from contact-sheet counts
@@ -3158,6 +3726,8 @@ class Handler(BaseHTTPRequestHandler):
                                 self.work, item['companion_src'], item['companion_dest'],
                             )
                 ok_n = sum(1 for r in results if r.get('ok'))
+                if ok_n:
+                    clear_web_caches()
                 self._send_json({
                     'ok': ok_n == len(results),
                     'results': results,
@@ -3196,6 +3766,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/' or path == '/index.html':
                 body = render_home(self.work)
+                self._send(body, 'text/html')
+            elif path == '/dashboard':
+                body = render_dashboard_http()
+                self._send(body, 'text/html')
+            elif path == '/by-date':
+                body = render_by_date_home(self.work)
                 self._send(body, 'text/html')
             elif path == '/screenshots':
                 body = render_screenshots(self.work, self.thumb_root)
@@ -3424,6 +4000,7 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copy2(dest, bak)
             tmp.write_text(yaml_text, encoding='utf-8')
             os.replace(tmp, dest)
+            clear_web_caches()
         except Exception as e:
             try:
                 if tmp.exists():
@@ -4045,10 +4622,11 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if parse_err:
-            ledger = (
-                '<div class="ledger"><div class="ledger-empty">'
-                '配置无法解析，请展开下方编辑配置修正。'
-                '</div></div>'
+            ledger = _empty_state(
+                '主题配置无法解析',
+                '展开下方编辑配置，按提示修正 YAML 后再保存。保存只写配置，不会搬文件。',
+                [],
+                kicker='配置有误',
             )
             hint = (
                 f'<p class="events-hint err">配置有误：{_esc(parse_err)}</p>'
@@ -4056,10 +4634,10 @@ class Handler(BaseHTTPRequestHandler):
             fold_note = ''
             fold_open = ' open'
         elif not rows:
-            ledger = (
-                '<div class="ledger"><div class="ledger-empty">'
-                '还没有主题。展开下方编辑配置，按示例添加。'
-                '</div></div>'
+            ledger = _empty_state(
+                '还没有主题',
+                '展开下方编辑配置，按示例添加旅行或事件。保存只写配置；真正搬文件前，先复制试跑命令看清计划。',
+                [],
             )
             hint = ''
             fold_note = (

@@ -195,6 +195,7 @@ inbox/
 #   0. 已知相机文件名（IMG_/VID_/DJI_/…）→ by-date/（normal）
 #   图片：含 screenshot → screenshots/；无 GPS → screenshots/
 #   视频：含 record → screenrecords/；（无 Make 或 无 GPS）→ screenrecords/
+#   非图片/视频（如 HTML、PDF、TXT）→ 跳过，留在 inbox/
 # 其他照片 → by-date/<YYYY-MM>/photos/；视频 → videos/
 # 主题文件进 2026-MM_<theme>/，无主题文件进 2026-MM/
 ```
@@ -214,6 +215,7 @@ inbox/
 > - Android `Screenrecorder_….mp4` → 含 `record` → `screenrecords/`
 > - iOS `RPReplay_Final_….mov`（无 Make/GPS）→ `screenrecords/`
 > - `VID_….mp4` / `IMG_….HEIC`（相机文件名白名单）→ `by-date/`
+> - `.html` / `.pdf` / `.txt` 等非图片、非视频 → 不处理，留在 `inbox/`
 > - **Live Photo**：同名 `IMG_xxxx.HEIC` + `IMG_xxxx.MOV`（同目录，或 inbox 内跨文件夹但 stem 全局唯一）→ 成对进 `by-date/.../photos/`，共用 stem `<date>_<source>_live_<hash>.{heic,mov}`（无 source 则为 `<date>_live_<hash>`）；跨目录配对日志为 `[live-pair-cross]`。同名多份有歧义则跳过并告警。Web 画廊只显示静图并标 Live。单边仍按普通照片/视频规则。
 > - 手机拍的证件/票据 → 整理进 by-date 后，在 Web 勾选「移至文档」
 > - 物品照片/视频 → 整理进 by-date 后，在 Web 勾选「移至物品」
@@ -242,13 +244,14 @@ picvault theme rebucket --theme <主题名> --yes   # 让该主题配置生效�
 # 浏览器开 http://mac-mini.local:8765/
 # 或用 dashboard「04 Web 浏览」打开
 
-# 在月份/主题/截图/录屏页面：
+# 首页是图库文件夹总览；按年月分类入口显示为「年月」（/by-date）。
+# 在年月、月份/主题、截图、录屏页面：
 #   · 点 ★ 加星 → _meta/stars/<bucket>.json
 #   · 勾选文件 → 按当前页显示可用目标（主题桶可「放回默认月桶」；另有移至截图录屏 / 移回普通分类 / 移至文档 / 移至物品）
 #   · 「移至回收站」→ _trash/<批次>/…（软删除，可找回；不进备份盘）
 ```
 
-导航含 **加星**（`/starred` 汇总全部 ★）、**截图**、**录屏**、**文档**、**物品**。`web_browse.py` 后台跑着就行。
+导航含 **年月**（`/by-date`）、**加星**（`/starred` 汇总全部 ★）、**截图**、**录屏**、**文档**、**物品**；首页只显示回收站计数，不提供回收站浏览页。`web_browse.py` 后台跑着就行。
 
 ### 7. 导出精选到 iPhone
 

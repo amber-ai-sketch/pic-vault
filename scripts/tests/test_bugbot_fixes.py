@@ -4,9 +4,11 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,6 +30,22 @@ def check(name, cond, detail=''):
     else:
         print(f'  ✗ FAIL: {name}' + (f' — {detail}' if detail else ''))
         failed += 1
+
+
+def check_page_js_syntax():
+    node = shutil.which('node')
+    if not node:
+        check('PAGE_JS syntax check skipped (node missing)', True)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        js_path = Path(tmp) / 'page.js'
+        js_path.write_text(wb.PAGE_JS, encoding='utf-8')
+        proc = subprocess.run(
+            [node, '--check', str(js_path)],
+            capture_output=True,
+            text=True,
+        )
+    check('PAGE_JS parses as JavaScript', proc.returncode == 0, detail=proc.stderr)
 
 
 def test_dashboard_pipeline_button():
@@ -75,6 +93,115 @@ def test_dashboard_web_start_copy():
     check('open browse no longer new tab', "window.open('http://localhost:' + WEB_PORT + '/', '_blank')" not in text)
 
 
+def test_gallery_menu_counts_and_dismissal():
+    print('\n1c. Gallery menu shows theme count and closes on outside click')
+    js = wb.PAGE_JS
+    check_page_js_syntax()
+    check(
+        'gallery menu outside click handler',
+        'document.querySelectorAll(\'.jumps-more[open]\')' in js
+        and 'if (!menu.contains(e.target)) menu.open = false;' in js,
+    )
+    check(
+        'gallery shortcut nav replaces history between peers',
+        'function shouldReplaceGalleryShortcutNav' in js
+        and "'/by-date': true" in js
+        and 'galleryShortcutPaths[currentPath]' in js
+        and 'window.location.replace(jumpLink.href)' in js,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        (work / 'by-date' / '2026' / '2026-07' / 'photos').mkdir(parents=True)
+        (work / 'by-date' / '2026' / '2026-08').mkdir(parents=True)
+        (work / 'by-date' / '2025' / '2025-12' / 'videos').mkdir(parents=True)
+        (work / '_meta').mkdir(parents=True)
+        (work / '_meta' / 'events.yaml').write_text(
+            'themes:\n'
+            '  - name: 海南\n'
+            '    month: 2026-07\n'
+            '    sources: [iphone]\n'
+            '  - name: 雪山\n'
+            '    month: 2025-12\n'
+            '    sources: [canon]\n',
+            encoding='utf-8',
+        )
+        html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
+        check(
+            'gallery menu has by-date entry',
+            'href="/by-date"><span class="jump-name">按日期</span>' in html,
+        )
+        check(
+            'gallery menu theme count',
+            'href="/themes"><span class="jump-name">主题</span><span class="n">2 项</span></a>' in html,
+        )
+
+
+def test_home_overview_cards_and_by_date_route():
+    print('\n1c2. Home is folder overview; by-date keeps year ledger')
+    import inspect
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        photo = work / 'by-date' / '2026' / '2026-07' / 'photos'
+        video = work / 'by-date' / '2026' / '2026-07' / 'videos'
+        theme_photo = work / 'by-date' / '2026' / '2026-08_海南' / 'photos'
+        for d in (photo, video, theme_photo, work / 'screenrecords', work / 'docs', work / 'things', work / '_trash'):
+            d.mkdir(parents=True)
+        shots = work / 'screenshots'
+        shots.mkdir(parents=True)
+        (photo / '20260701_120000_iphone_a.jpg').write_bytes(b'x')
+        (video / '20260701_120000_iphone_b.mov').write_bytes(b'x')
+        (theme_photo / '20260801_120000_iphone_c.jpg').write_bytes(b'x')
+        for i in range(2):
+            (shots / f'screenshot_{i}.jpg').write_bytes(b'x')
+        (work / 'screenrecords' / 'screenrecorder_0.mov').write_bytes(b'x')
+        (work / 'docs' / 'doc_0.jpg').write_bytes(b'x')
+        (work / 'things' / 'things_0.jpg').write_bytes(b'x')
+        (work / '_trash' / 'batch').mkdir(parents=True)
+        (work / '_trash' / 'batch' / 'deleted.jpg').write_bytes(b'x')
+        (work / '_meta' / 'stars').mkdir(parents=True)
+        (work / '_meta' / 'events.yaml').write_text(
+            'themes:\n'
+            '  - name: 海南\n'
+            '    month: 2026-08\n'
+            '    sources: [iphone]\n'
+            '  - name: 雪山\n'
+            '    month: 2025-12\n'
+            '    sources: [canon]\n',
+            encoding='utf-8',
+        )
+        (work / '_meta' / 'stars' / 'screenshots.json').write_text(
+            json.dumps({str((shots / 'screenshot_0.jpg').relative_to(work)): True}),
+            encoding='utf-8',
+        )
+
+        wb.clear_web_caches()
+        home = wb.render_home(work).decode('utf-8')
+        check('home title is gallery overview', '<h2 class="page-title">图库</h2>' in home)
+        check('home has by-date card', '<span class="home-card-name">按日期</span>' in home and 'href="/by-date"' in home)
+        check('home no longer links years directly', 'href="/y/2026"' not in home)
+        check('home screenshot count card', re.search(r'home-card-name">截图</span><span class="home-card-count">2 项</span>', home) is not None)
+        check('home screenrecord count card', re.search(r'home-card-name">录屏</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home docs count card', re.search(r'home-card-name">文档</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home things count card', re.search(r'home-card-name">物品</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home starred count card', re.search(r'home-card-name">加星</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home theme count card', re.search(r'home-card-name">主题</span><span class="home-card-count">2 项</span>', home) is not None)
+        check('home trash count is visible', re.search(r'home-card-name">回收站</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home trash is not a route link', 'href="/trash"' not in home)
+
+        by_date = wb.render_by_date_home(work).decode('utf-8')
+        check('by-date title is 按日期', '<h2 class="page-title">按日期</h2>' in by_date)
+        check('by-date keeps year ledger', 'href="/y/2026"' in by_date)
+
+        year = wb.render_year(work, '2026').decode('utf-8')
+        check('year breadcrumb includes 按日期', 'href="/by-date">按日期</a>' in year)
+        bucket = wb.render_bucket(work, '2026', '2026-07', work / '_meta' / 'thumbs').decode('utf-8')
+        check('bucket breadcrumb includes 按日期', 'href="/by-date">按日期</a>' in bucket)
+
+        src = inspect.getsource(wb.Handler.do_GET)
+        check('handler has by-date route', "path == '/by-date'" in src and 'render_by_date_home' in src)
+
+
 def test_picvault_web_port_state():
     print('\n1d. picvault web status uses persisted custom port')
     with tempfile.TemporaryDirectory() as tmp:
@@ -102,21 +229,85 @@ def test_picvault_web_port_state():
         check('picvault web no action prints usage', no_action.returncode != 0 and 'Usage: picvault web' in (no_action.stdout + no_action.stderr))
 
 
+def test_picvault_web_restart_clears_orphan_same_work_server():
+    print('\n1e. picvault web restart clears same-WORK orphan server')
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        meta = work / '_meta'
+        (meta / 'logs').mkdir(parents=True)
+        (meta / 'thumbs').mkdir(parents=True)
+        (work / 'by-date').mkdir()
+        (work / 'screenshots').mkdir()
+        (work / 'screenrecords').mkdir()
+        (work / 'docs').mkdir()
+        (work / 'things').mkdir()
+        (work / 'inbox').mkdir()
+        (work / '_trash').mkdir()
+
+        sock = __import__('socket').socket()
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
+        orphan = subprocess.Popen(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / 'scripts' / 'web_browse.py'),
+                '--work', str(work), '--host', '127.0.0.1', '--port', str(port),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+        try:
+            for _ in range(30):
+                if orphan.poll() is None:
+                    break
+                time.sleep(0.1)
+            if orphan.poll() is not None:
+                check('orphan fixture started', False, detail=f'exit={orphan.returncode}')
+                return
+
+            restart = subprocess.run(
+                [str(PICVAULT), 'web', 'restart', '--port', str(port)],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            out = restart.stdout + restart.stderr
+            check('restart succeeds with orphan listener', restart.returncode == 0, detail=out)
+            check('restart wrote pid file', (meta / 'web.pid').is_file())
+            check('new server is running', 'Web UI started' in out, detail=out)
+        finally:
+            pid_file = meta / 'web.pid'
+            if pid_file.is_file():
+                subprocess.run(
+                    [str(PICVAULT), 'web', 'stop'], env=env,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            if orphan.poll() is None:
+                orphan.terminate()
+                try:
+                    orphan.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    orphan.kill()
+
+
 def test_console_link_shows_dashboard_url():
-    print('\n1c. Web UI 控制台 tip includes dashboard URL')
+    print('\n1c. Web UI 控制台 opens dashboard in a new tab')
     html = wb.page_shell('首页', '<p>x</p>', work=None).decode('utf-8')
-    dash_uri = wb.dashboard_file_url()
-    check('has 控制台 link', 'id="consoleLink">控制台</a>' in html)
-    check('embeds dashboard file URL', dash_uri in html)
-    check('labels 控制台地址', '控制台地址' in html)
+    check('has 控制台 link', '<a href="/dashboard" id="consoleLink"' in html)
+    check('console opens in new tab', 'target="_blank"' in html and 'rel="noopener"' in html)
+    check('no console prompt fallback', 'window.prompt' not in html and '控制台地址' not in html)
     check('no browse origin as console', "location.origin + '/'" not in html)
     check('no 当前访问地址 browse label', '当前访问地址' not in html)
-    check('clipboard copy attempt', 'navigator.clipboard.writeText' in html)
-    check('prompt for selectable URL', 'window.prompt' in html)
     check(
         'no old alert-only copy',
         "alert('请从控制台点「打开浏览」进入本页，或手动打开 outputs/dashboard.html')" not in html,
     )
+    check('dashboard route renderer exists', callable(getattr(wb, 'render_dashboard_http', None)))
+    dash_html = wb.render_dashboard_http().decode('utf-8')
+    check('dashboard route injects project root', 'window.PICVAULT_PROJECT_ROOT' in dash_html)
+    check('dashboard uses injected project root', 'if (window.PICVAULT_PROJECT_ROOT)' in dash_html)
 
 
 def test_init_skeleton():
@@ -216,6 +407,22 @@ def test_star_api_and_lightbox_sync():
         'lightbox keys ignore typing targets',
         'function isTypingTarget' in js,
     )
+    check('lightbox has pick checkbox', 'class="lb-pick"' in js and '勾选' in js)
+    check(
+        'lightbox action groups have no helper labels',
+        'lb-group-label">复核' not in js
+        and 'lb-group-label">文件' not in js
+        and 'lb-group-label">危险' not in js,
+    )
+    check('lightbox space picks and advances', 'function pickCurrentAndAdvance' in js and "e.code === 'Space'" in js)
+    check('lightbox pick syncs gallery cell', 'setPathPicked(path, true)' in js)
+    check('bulk star function exists', 'function starSelected' in js)
+    check('bulk star uses star API on action', "action: 'on'" in js)
+    check('bulk star button present', 'data-bulk-star="1"' in wb._gallery_toolbar(2, 0, context='screen'))
+    check('lightbox has single delete', 'function trashLightboxCurrent' in js and 'class="lb-trash"' in js)
+    check('lightbox delete posts one path', 'JSON.stringify({ paths: [path] })' in js)
+    check('lightbox delete confirm uses escaped newlines', "删除当前文件？\\n' + (name || path) + '\\n\\n会移到 _trash/" in js)
+    check('lightbox delete confirm has no literal newline', "删除当前文件？\n' + (name || path)" not in js)
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
@@ -260,11 +467,62 @@ def test_star_api_and_lightbox_sync():
             check('star toggle on ok', r1.get('ok') is True and r1.get('starred') is True)
             stars = wb.load_stars(work, bucket)
             check('star persisted to JSON', rel in stars)
+            home_on = wb.render_home(work).decode('utf-8')
+            check('home star count updates on', 'home-card-name">加星</span><span class="home-card-count">1 项</span>' in home_on)
             r2 = post({'path': rel, 'bucket': bucket, 'action': 'toggle'})
             check('star toggle off ok', r2.get('ok') is True and r2.get('starred') is False)
             check('star removed from JSON', rel not in wb.load_stars(work, bucket))
+            home_off = wb.render_home(work).decode('utf-8')
+            check('home star count updates off', 'home-card-name">加星</span><span class="home-card-count">0 项</span>' in home_off)
             bad = post({'path': rel, 'bucket': '', 'action': 'toggle'})
             check('empty bucket rejected', bad.get('ok') is False)
+        finally:
+            httpd.shutdown()
+
+
+def test_star_api_accepts_on_for_batch_ui():
+    print('\n6b. /api/star action=on supports batch UI')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        photo = work / 'screenshots'
+        photo.mkdir(parents=True)
+        files = [photo / 'a.jpg', photo / 'b.jpg']
+        for f in files:
+            f.write_bytes(b'jpg')
+
+        class H(wb.Handler):
+            pass
+
+        H.work = work
+        H.thumb_root = work / '_meta' / 'thumbs'
+        from http.server import ThreadingHTTPServer
+        import threading
+        import urllib.request
+
+        httpd = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        base = f'http://127.0.0.1:{port}'
+
+        try:
+            for f in files:
+                req = urllib.request.Request(
+                    base + '/api/star',
+                    data=json.dumps({
+                        'path': str(f.relative_to(work)),
+                        'bucket': 'screenshots',
+                        'action': 'on',
+                    }).encode(),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req) as r:
+                    data = json.loads(r.read())
+                check(f'action=on ok for {f.name}', data.get('ok') is True and data.get('starred') is True)
+            stars = wb.load_stars(work, 'screenshots')
+            check('batch-ui stars persisted both files', all(str(f.relative_to(work)) in stars for f in files))
         finally:
             httpd.shutdown()
 
@@ -485,8 +743,8 @@ def test_ledger_star_live_counts():
         check('render_year keeps photos/videos', '照片 2｜视频 1' in year_html)
 
         home_html = wb.render_home(work).decode('utf-8')
-        check('render_home year totals include 加星', '加星 2' in home_html)
-        check('render_home year totals include Live', '实况 1' in home_html)
+        check('render_home by-date card keeps compact date meta', '1 年｜1 个主题' in home_html)
+        check('render_home by-date card hides detailed ledger stats', '照片 2｜视频 1｜加星 2｜实况 1' not in home_html)
 
 
 def test_events_api_edit():
@@ -1214,6 +1472,41 @@ def test_rename_hardening_source_and_events_load():
             check('ensure dest under work', True)
 
 
+def test_rename_and_gallery_ignore_non_media_files():
+    print('\n17b. rename/gallery ignore non-media files')
+    import rename_organize as ro
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        inbox = work / 'inbox'
+        inbox.mkdir(parents=True)
+        html_file = inbox / 'screenshot_20260721_142950.html'
+        image_file = inbox / 'screenshot_20260721_142951.png'
+        html_file.write_text('<html></html>', encoding='utf-8')
+        image_file.write_bytes(b'not-real-png')
+
+        scanned = ro.scan_inbox(work)
+        check('scan_inbox ignores html files', html_file not in scanned)
+        check('scan_inbox keeps image files', image_file in scanned)
+
+        try:
+            ro.plan_destination(work, html_file, force_type=None)
+            html_rejected = False
+        except ValueError:
+            html_rejected = True
+        check('plan_destination rejects html files', html_rejected)
+
+        screenshots = work / 'screenshots'
+        screenshots.mkdir(parents=True)
+        old_html = screenshots / 'screenshot_20260721_142950.html'
+        old_png = screenshots / 'screenshot_20260721_142951.png'
+        old_html.write_text('<html></html>', encoding='utf-8')
+        old_png.write_bytes(b'png')
+        listed = wb.list_screenshots(work)
+        check('gallery hides existing html in screenshots', old_html not in listed)
+        check('gallery still lists screenshot images', old_png in listed)
+
+
 def test_cross_month_theme_start_bucket():
     print('\n15. cross-month theme buckets use start month')
     import rename_organize as ro
@@ -1810,6 +2103,49 @@ def test_theme_remove_cli_without_yaml():
         check('theme remove preserves files', themes[0].get('files') == ['keep.jpg'])
 
 
+def test_by_date_empty_copy_says_normal_archive():
+    print('\n25d. By-date empty copy distinguishes normal archive from screenshots')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        for name in ('by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta'):
+            (work / name).mkdir(parents=True)
+        for i in range(2):
+            (work / 'screenshots' / f'screenshot_{i}.jpg').write_bytes(b'x')
+        wb.clear_web_caches()
+        html = wb.render_by_date_home(work).decode('utf-8')
+        check('by-date empty copy says date archive', '还没有按拍摄日期归档的照片或视频' in html)
+        check('by-date empty copy keeps current hint', '把素材放进 inbox' in html)
+        check('by-date empty copy keeps screenshot count separate', '截图</span><span class="n">2 项</span>' in html)
+
+
+def test_gallery_empty_states_only_link_home():
+    print('\n25e. Gallery empty states only keep back-to-gallery action')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        for name in ('by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta'):
+            (work / name).mkdir(parents=True)
+        thumb_root = work / '_meta' / 'thumbs'
+        pages = {
+            'by-date': wb.render_by_date_home(work).decode('utf-8'),
+            'missing-year': wb.render_year(work, '2027').decode('utf-8'),
+            'screenshots': wb.render_screenshots(work, thumb_root).decode('utf-8'),
+            'screenrecords': wb.render_screenrecords(work, thumb_root).decode('utf-8'),
+            'docs': wb.render_docs(work, thumb_root).decode('utf-8'),
+            'things': wb.render_things(work, thumb_root).decode('utf-8'),
+            'starred': wb.render_starred(work, thumb_root).decode('utf-8'),
+        }
+        (work / 'by-date' / '2026').mkdir(parents=True)
+        pages['empty-year'] = wb.render_year(work, '2026').decode('utf-8')
+        for name, html in pages.items():
+            m = re.search(r'<div class="empty-actions">(.*?)</div>', html)
+            actions = m.group(1) if m else ''
+            check(f'{name} empty state has back-to-gallery', 'href="/">回到图库</a>' in actions)
+            check(f'{name} empty state has only one action', actions.count('<a') == 1, detail=actions)
+            check(f'{name} empty state has no secondary action', 'class="primary"' not in actions, detail=actions)
+
+
 def test_web_path_traversal_and_cors_hardening():
     """Star bucket /thumb /month fences + CORS + default host."""
     print('\n26. Web path traversal + CORS hardening')
@@ -2065,7 +2401,7 @@ def test_perf_quick_wins_cache_and_thumb_headers():
             # render_home must not trigger a second scan via page_shell.
             html = wb.render_home(work).decode('utf-8')
             check('render_home scans once', scan_calls['n'] == 1, detail=str(scan_calls['n']))
-            check('home still has 归档', '归档' in html)
+            check('home is gallery overview', '图库' in html and 'href="/by-date"' in html)
             # Second home within TTL: topbar cache → no new scan_buckets.
             wb.render_home(work)
             check(
@@ -2083,6 +2419,36 @@ def test_perf_quick_wins_cache_and_thumb_headers():
         finally:
             wb.scan_buckets = old_scan
             wb.clear_web_caches()
+
+        # Home trash card must not rglob _trash on every refresh.
+        trash_calls = {'n': 0}
+        real_count_for_home = wb.count_files_in
+
+        def counting_trash_for_home(p):
+            if Path(p).name == '_trash':
+                trash_calls['n'] += 1
+            return real_count_for_home(p)
+
+        old_count_for_home = wb.count_files_in
+        try:
+            wb.count_files_in = counting_trash_for_home
+            wb.clear_web_caches()
+            wb.render_home(work)
+            wb.render_home(work)
+            check('home trash count cached', trash_calls['n'] == 1, detail=str(trash_calls['n']))
+        finally:
+            wb.count_files_in = old_count_for_home
+            wb.clear_web_caches()
+
+        # Mutating file operations must invalidate home/topbar counts immediately.
+        stale_target = photo / '20260701_120000_iphone_bbb222.jpg'
+        stale_target.write_bytes(jpeg)
+        wb.clear_web_caches()
+        before_home = wb.render_home(work).decode('utf-8')
+        wb.trash_paths(work, [str(stale_target.relative_to(work))])
+        after_home = wb.render_home(work).decode('utf-8')
+        check('home count before trash includes target', 'home-card-name">按日期</span><span class="home-card-count">2 项</span>' in before_home)
+        check('home count invalidated after trash', 'home-card-name">按日期</span><span class="home-card-count">1 项</span>' in after_home)
 
         # status counts: second call must not re-walk (spy count_files_in).
         count_calls = {'n': 0}
@@ -2322,7 +2688,10 @@ def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
     test_dashboard_web_start_copy()
+    test_gallery_menu_counts_and_dismissal()
+    test_home_overview_cards_and_by_date_route()
     test_picvault_web_port_state()
+    test_picvault_web_restart_clears_orphan_same_work_server()
     test_console_link_shows_dashboard_url()
     test_init_skeleton()
     test_run_commands_backup_and_pipeline()
@@ -2330,6 +2699,7 @@ def main():
     test_picvault_sync_uses_backup_env()
     test_picvault_sync_args_order_independent()
     test_star_api_and_lightbox_sync()
+    test_star_api_accepts_on_for_batch_ui()
     test_things_reclassify_and_ui()
     test_live_pair_mov_fail_rolls_back()
     test_reclassify_moves_live_companion()
@@ -2345,6 +2715,7 @@ def main():
     test_theme_parse_validate_hardening()
     test_web_sync_cmd_is_dry_run()
     test_rename_hardening_source_and_events_load()
+    test_rename_and_gallery_ignore_non_media_files()
     test_cross_month_theme_start_bucket()
     test_return_to_default_month()
     test_theme_href_never_falls_back_to_default_month()
@@ -2352,6 +2723,8 @@ def main():
     test_theme_start_month_reassign_and_validate()
     test_theme_add_files_cli_and_list()
     test_theme_remove_cli_without_yaml()
+    test_by_date_empty_copy_says_normal_archive()
+    test_gallery_empty_states_only_link_home()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()

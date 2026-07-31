@@ -166,6 +166,10 @@ def is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTS
 
 
+def is_media_file(path: Path) -> bool:
+    return is_image(path) or is_video(path)
+
+
 # === EXIF ===
 
 def read_exif(path: Path) -> dict:
@@ -394,6 +398,9 @@ def classify_capture(path: Path, exif: dict, video_tags: dict,
     del no_gps  # always-on in v7
     screenshot_keywords = screenshot_keywords or DEFAULT_SCREENSHOT_KEYWORDS
     recording_keywords = recording_keywords or DEFAULT_RECORDING_KEYWORDS
+
+    if not is_media_file(path):
+        raise ValueError(f'unsupported file type: {path.suffix.lower() or path.name}')
 
     if is_camera_filename(path):
         return 'normal'
@@ -1569,8 +1576,10 @@ def scan_inbox(work: Path) -> list[Path]:
     files = []
     for f in inbox.rglob('*'):
         if f.is_file():
-            # Skip .DS_Store, .source sidecars, and other dotfiles
+            # Skip .DS_Store, .source sidecars, other dotfiles, and non-media
             if f.name.startswith('.'):
+                continue
+            if not is_media_file(f):
                 continue
             files.append(f)
     return files
