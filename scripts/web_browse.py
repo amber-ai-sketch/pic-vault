@@ -66,7 +66,7 @@ def dashboard_file_url() -> str:
     """file:// URL for outputs/dashboard.html (控制台)."""
     return DASHBOARD_HTML.resolve().as_uri()
 
-EMPTY_EVENTS_YAML = """# 主题配置（rename_organize / Web /themes）
+EMPTY_EVENTS_YAML = """# 主题配置（rename_organize、Web、themes）
 # 也可用：./scripts/add_theme.py --interactive
 #
 # 示例（复制下面块，去掉每行行首的「# 」后保存；文件夹会变成 by-date/2026/2026-07_海南/）：
@@ -95,10 +95,10 @@ EMPTY_EVENTS_YAML = """# 主题配置（rename_organize / Web /themes）
 #   #   files:
 #   #     - 20260601_100000_iphone_a3f2.heic
 #
-# 字段：name 必填；month(YYYY-MM) 有 start 时可省略；date_range / sources / files 至少其一
+# 字段：name 必填；month（YYYY-MM）有 start 时可省略；date_range、sources、files 至少写一项
 # date_range 可跨月；主题桶 = by-date/<开始年>/<开始月>_<名>/
-# 保存后按主题同步：picvault theme rebucket --theme <名> （先 dry-run，再 --yes）
-# （只扫该主题；可迁出到其它主题；全量用 --all）
+# 保存只写配置，不搬文件。保存后复制试跑命令；确认无误再加 --yes。
+# 单个主题只扫该主题；全量同步用 --all，风险更高。
 # rename 只处理 inbox，不再自动全量同步主题
 
 themes: []
@@ -483,13 +483,13 @@ def count_month_media(month_dir: Path) -> tuple[int, int, int]:
 
 def format_ledger_stats(photos: int, videos: int,
                         stars: int = 0, lives: int = 0) -> str:
-    """Chinese ledger-stats line; omit zero star/Live to keep rows readable."""
-    parts = [f'{photos} 张', f'{videos} 视频']
+    """Chinese ledger-stats line; omit zero star/Live Photo to keep rows readable."""
+    parts = [f'照片 {photos}', f'视频 {videos}']
     if stars:
-        parts.append(f'{stars} 加星')
+        parts.append(f'加星 {stars}')
     if lives:
-        parts.append(f'{lives} Live')
-    return ' · '.join(parts)
+        parts.append(f'实况 {lives}')
+    return '｜'.join(parts)
 
 
 def bucket_month_key(name: str) -> str:
@@ -930,21 +930,29 @@ def _esc(s) -> str:
 
 PAGE_CSS = '''
 :root {
-  --paper: #FFFFFF;
-  --mist: #F4F4F4;
-  --ink: #111111;
-  --muted: #6B6B6B;
-  --line: #E6E6E6;
-  --live: #1F7A4D;
-  --warn: #8A6A1F;
-  --hazard: #9B2C2C;
+  --paper: #FFFFFC;
+  --mist: #F4F2EC;
+  --ink: #11100E;
+  --muted: #66625B;
+  --line: #DDD9CF;
+  --live: #236F4C;
+  --warn: #886318;
+  --hazard: #8E2F28;
   --bg: var(--paper);
   --soft: var(--mist);
-  --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sans: "PingFang SC", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
+  scroll-behavior: smooth;
+}
   body {
   margin: 0;
   min-height: 100vh;
@@ -952,13 +960,16 @@ html { scroll-behavior: smooth; }
   color: var(--ink);
   line-height: 1.5;
   background: var(--paper);
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--ink); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 :focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
-.wrap { max-width: 1120px; margin: 0 auto; padding: 28px 28px 72px; }
+.wrap { width: min(100%, 1120px); margin: 0 auto; padding: 28px clamp(22px, 2.6vw, 32px) 72px; }
 
 .brand-mark {
   font-family: var(--sans);
@@ -999,24 +1010,24 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   min-width: 0;
 }
 .crumbs a, .crumbs span {
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   text-decoration: none;
   padding: 2px 4px;
 }
 .crumbs a:hover { color: var(--ink); text-decoration: none; background: var(--mist); }
 .crumbs a.here { color: var(--ink); font-weight: 500; }
-.crumbs .sep { color: var(--line); user-select: none; padding: 2px 0; }
+.crumbs .sep { color: var(--muted); user-select: none; padding: 2px 0; }
 
 .jumps {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  gap: 2px 18px;
   align-items: center;
   justify-content: flex-end;
 }
 .jumps a, .jumps-more > summary {
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   text-decoration: none;
   letter-spacing: 0.01em;
@@ -1024,17 +1035,17 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .jumps a:hover { color: var(--ink); text-decoration: none; }
 .jumps a .n {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
-.jumps a#consoleLink { font-weight: 500; color: var(--ink); }
+.jumps a#consoleLink,
+.jumps-more > summary { font-weight: 500; color: var(--ink); }
 .jumps-more {
   position: relative;
 }
 .jumps-more > summary {
   list-style: none;
   cursor: pointer;
-  font-weight: 500;
   padding: 2px 0;
   user-select: none;
 }
@@ -1063,6 +1074,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   text-decoration: none;
   white-space: nowrap;
 }
+.jumps-more-panel .n { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted); }
 .jumps-more-panel a:hover {
   background: var(--mist);
   color: var(--ink);
@@ -1088,18 +1100,19 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .page-lede {
   margin: 8px 0 0;
-  font-size: 0.92rem;
+  font-size: var(--text-sm);
   color: var(--muted);
   max-width: 36em;
 }
 .page-meta {
-  font-family: var(--mono);
-  font-size: 0.7rem;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
   color: var(--muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  max-width: 40em;
 }
 .section-label {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--muted);
   margin: 0 0 14px;
@@ -1123,11 +1136,11 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   z-index: 10;
 }
 .toolbar .count {
-  font-family: var(--mono);
-  font-size: 0.7rem;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
   color: var(--muted);
   margin-right: auto;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 .toolbar-filters {
   display: flex;
@@ -1153,7 +1166,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .chip {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   padding: 5px 10px 7px;
   border: none;
   border-radius: 0;
@@ -1172,14 +1185,14 @@ body.select-mode .toolbar-organize { display: flex; }
 .chip.on .n { color: var(--muted); }
 .chip .n {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   margin-left: 4px;
 }
 .btn-reclass {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   padding: 5px 12px;
   border: none;
   border-radius: 0;
@@ -1193,7 +1206,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .btn-trash {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   padding: 5px 12px;
   border: 1px solid var(--hazard);
   border-radius: 0;
@@ -1206,17 +1219,18 @@ body.select-mode .toolbar-organize { display: flex; }
 .btn-trash:disabled { opacity: 0.4; cursor: not-allowed; }
 .sel-count {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--ink);
   min-width: 4.5em;
 }
 .toolbar .filter-tip {
   font-family: var(--sans);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   margin-left: 6px;
   letter-spacing: 0.02em;
 }
+.toolbar .filter-tip::before { content: '说明：'; }
 .gallery-more {
   display: flex;
   flex-direction: column;
@@ -1225,8 +1239,8 @@ body.select-mode .toolbar-organize { display: flex; }
   margin: 28px 0 48px;
 }
 .gallery-more-tip {
-  font-family: var(--mono);
-  font-size: 0.7rem;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
   color: var(--muted);
   margin: 0;
   letter-spacing: 0.02em;
@@ -1234,7 +1248,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .btn-more {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   padding: 10px 28px;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -1253,15 +1267,16 @@ body.select-mode .toolbar-organize { display: flex; }
 }
 .ledger-row {
   display: grid;
-  grid-template-columns: minmax(5.5em, auto) 1fr auto auto;
-  gap: 10px 18px;
-  align-items: baseline;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 18px;
+  align-items: start;
   padding: 18px 4px;
   border-bottom: 1px solid var(--line);
   text-decoration: none;
   color: inherit;
   transition: background .12s;
 }
+.ledger-row > * { min-width: 0; }
 .ledger-row:hover {
   background: var(--mist);
   text-decoration: none;
@@ -1284,26 +1299,37 @@ body.select-mode .toolbar-organize { display: flex; }
   letter-spacing: -0.035em;
   color: var(--ink);
   transition: letter-spacing .12s ease;
+  overflow-wrap: anywhere;
 }
-.ledger-sub { font-size: 0.9rem; color: var(--muted); }
+.ledger-sub {
+  grid-column: 1;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
 .ledger-sub .theme { color: var(--ink); font-weight: 500; }
 .ledger-stats {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: #444444;
-  text-align: right;
-  white-space: nowrap;
+  grid-column: 1;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  text-align: left;
+  white-space: normal;
   letter-spacing: 0.02em;
 }
 .ledger-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   justify-self: end;
+  align-self: center;
 }
 .ledger-sync {
   font-family: var(--sans);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
@@ -1318,18 +1344,20 @@ body.select-mode .toolbar-organize { display: flex; }
 .ledger-row:hover .ledger-sync,
 .ledger-sync:focus-visible {
   opacity: 1;
-  border-color: #c8c5be;
+  border-color: #C9C5B8;
   color: var(--ink);
 }
 .ledger-sync:hover,
 .ledger-sync:focus-visible {
   color: var(--ink);
-  border-color: #c8c5be;
+  border-color: #C9C5B8;
 }
 @media (hover: none) {
   .ledger-sync { opacity: 0.85; border-color: var(--line); }
 }
 .ledger-go {
+  grid-column: 2;
+  grid-row: 1 / span 3;
   font-family: var(--sans);
   font-size: 1.15rem;
   color: var(--muted);
@@ -1337,12 +1365,13 @@ body.select-mode .toolbar-organize { display: flex; }
   line-height: 1;
   transition: color .12s ease, transform .12s ease, opacity .12s ease;
   justify-self: end;
+  align-self: center;
 }
 .ledger-row:hover .ledger-go { color: var(--ink); opacity: 1; transform: translateX(2px); }
 .ledger-empty {
   padding: 48px 8px;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
   text-align: left;
   max-width: 28em;
 }
@@ -1409,7 +1438,7 @@ body.select-mode .star.on { opacity: 1; }
   background: var(--mist);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   text-decoration: none;
 }
 .cell .edge {
@@ -1423,20 +1452,20 @@ body.select-mode .star.on { opacity: 1; }
 }
 .cell .idx {
   font-family: var(--mono);
-  font-size: 0.62rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   flex-shrink: 0;
   letter-spacing: 0.04em;
 }
 .cell .fname {
   font-family: var(--sans);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  opacity: 0;
+  opacity: 0.72;
   transition: opacity .12s ease;
 }
 .cell:hover .fname,
@@ -1450,7 +1479,7 @@ body.select-mode .cell .fname {
   top: auto;
   bottom: 36px;
   font-family: var(--mono);
-  font-size: 0.58rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 2px 5px;
@@ -1534,19 +1563,22 @@ body.select-mode .cell .fname {
   border: none;
   padding: 10px 14px;
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--ink);
   max-width: 90vw;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .lb-bar .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 42vw;
+  min-width: 0;
 }
 .lb-bar .pos {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   flex-shrink: 0;
   letter-spacing: 0.02em;
@@ -1555,7 +1587,7 @@ body.select-mode .cell .fname {
 .lb-bar a {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   padding: 4px 10px;
   border: none;
   background: transparent;
@@ -1574,7 +1606,7 @@ body.select-mode .cell .fname {
   right: 20px;
   background: var(--ink);
   color: #fff;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   padding: 10px 14px;
   opacity: 0;
   transform: translateY(8px);
@@ -1590,7 +1622,7 @@ body.select-mode .cell .fname {
   background: var(--mist);
   border: none;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   overflow-x: auto;
   white-space: pre-wrap;
   color: var(--ink);
@@ -1613,7 +1645,7 @@ body.select-mode .cell .fname {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--muted);
   letter-spacing: 0.04em;
@@ -1623,7 +1655,7 @@ body.select-mode .cell .fname {
 .events-fold > summary::-webkit-details-marker { display: none; }
 .events-fold > summary::before {
   content: '›';
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
   line-height: 1;
   transition: transform 0.12s ease;
 }
@@ -1640,7 +1672,7 @@ body.select-mode .cell .fname {
   background: var(--mist);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   line-height: 1.45;
   resize: vertical;
 }
@@ -1652,7 +1684,7 @@ body.select-mode .cell .fname {
 }
 .events-toolbar button {
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   padding: 8px 14px;
   border: 1px solid var(--line);
   background: var(--paper);
@@ -1670,7 +1702,7 @@ body.select-mode .cell .fname {
 }
 .events-hint {
   margin: 0 0 14px;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   line-height: 1.45;
   max-width: 40em;
@@ -1678,13 +1710,13 @@ body.select-mode .cell .fname {
 .events-hint.err { color: var(--hazard); }
 .events-fold-note {
   margin: 0 0 10px;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--muted);
   line-height: 1.45;
   max-width: 42em;
 }
 .events-status {
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   min-height: 1.2em;
   color: var(--muted);
 }
@@ -1839,7 +1871,7 @@ PAGE_JS = '''
     if (btn) {
       btn.classList.toggle('on', !!on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btn.textContent = on ? '完成选择' : '选择';
+      btn.textContent = on ? '完成选择' : '批量选择';
     }
     if (!on) {
       document.querySelectorAll('.cell.selected').forEach(function (cell) {
@@ -1854,7 +1886,11 @@ PAGE_JS = '''
   function syncSelCount() {
     var n = document.querySelectorAll('.cell.selected').length;
     var el = document.getElementById('selCount');
-    if (el) el.textContent = n ? ('已选 ' + n) : '';
+    if (el) {
+      el.textContent = n ? ('已选 ' + n + ' 个') : (
+        document.body.classList.contains('select-mode') ? '已选 0 个，先勾选缩略图' : ''
+      );
+    }
     document.querySelectorAll('.btn-reclass, .btn-trash').forEach(function (b) {
       b.disabled = n === 0;
     });
@@ -1870,11 +1906,11 @@ PAGE_JS = '''
   async function reclassify(action) {
     var paths = selectedPaths();
     if (!paths.length) {
-      toast('请先点「选择」，再勾选文件');
+      toast('请先点「批量选择」，再勾选文件');
       return;
     }
     var label = ({
-      to_screen: '移至截图录屏',
+      to_screen: '移至截图与录屏',
       to_normal: '移回普通分类',
       to_docs: '移至文档',
       to_things: '移至物品',
@@ -1906,7 +1942,7 @@ PAGE_JS = '''
   async function trashSelected() {
     var paths = selectedPaths();
     if (!paths.length) {
-      toast('请先点「选择」，再勾选文件');
+      toast('请先点「批量选择」，再勾选文件');
       return;
     }
     if (!confirm('移至回收站：' + paths.length + ' 个文件？\\n\\n• 会移到 _trash/（可找回，不是永久删除）\\n• 不会同步到备份盘')) return;
@@ -1929,6 +1965,12 @@ PAGE_JS = '''
   }
 
   var filterMode = 'all';
+  var galleryIO = null;
+  function galleryAutoLoadAllowed() {
+    // 「仅加星」会把未加星格子 display:none，#galleryMore 常留在视口内，
+    // 若仍自动续载会把整库 DOM 拉回，抵消分页收益。手动「加载更多」仍可用。
+    return filterMode === 'all';
+  }
   function applyFilter() {
     document.querySelectorAll('.cell').forEach(function (cell) {
       var show = filterMode === 'all' || cell.classList.contains('starred');
@@ -1973,10 +2015,16 @@ PAGE_JS = '''
       var total = data.total != null ? data.total : (parseInt(sheet.getAttribute('data-total') || '0', 10) || 0);
       if (tip) {
         tip.textContent = data.has_more
-          ? ('已显示 ' + next + ' / ' + total + ' · 筛选仅作用于已加载')
+          ? ('已显示 ' + next + ' 个｜共 ' + total + ' 个｜筛选只看已加载内容')
           : ('已全部加载 ' + total + ' 个');
       }
-      if (!data.has_more && btn) btn.hidden = true;
+      if (!data.has_more) {
+        if (btn) btn.hidden = true;
+        if (galleryIO) {
+          galleryIO.disconnect();
+          galleryIO = null;
+        }
+      }
       applyFilter();
     } catch (err) {
       toast('网络错误：' + err);
@@ -1990,12 +2038,14 @@ PAGE_JS = '''
     var more = document.getElementById('galleryMore');
     if (!more || !galleryStillPaging()) return;
     if ('IntersectionObserver' in window) {
-      var io = new IntersectionObserver(function (entries) {
+      if (galleryIO) galleryIO.disconnect();
+      galleryIO = new IntersectionObserver(function (entries) {
+        if (!galleryAutoLoadAllowed()) return;
         if (entries.some(function (e) { return e.isIntersecting; })) {
           loadMoreGallery();
         }
       }, { rootMargin: '240px 0px' });
-      io.observe(more);
+      galleryIO.observe(more);
     }
   }
 
@@ -2155,7 +2205,7 @@ PAGE_JS = '''
     }
     var posEl = lb.querySelector('.pos');
     if (posEl) {
-      posEl.textContent = items.length ? ((pos + 1) + ' / ' + items.length) : '';
+      posEl.textContent = items.length ? ('第 ' + (pos + 1) + ' 项｜共 ' + items.length + ' 项') : '';
     }
     var raw = lb.querySelector('.open-raw');
     raw.href = src;
@@ -2198,7 +2248,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
     crumb_parts = []
     for i, (label, href) in enumerate(crumbs):
         if i:
-            crumb_parts.append('<span class="sep">/</span>')
+            crumb_parts.append('<span class="sep">›</span>')
         if href and i < len(crumbs) - 1:
             crumb_parts.append(f'<a href="{_esc(href)}">{_esc(label)}</a>')
         else:
@@ -2230,6 +2280,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         )
 
     more_links = [
+        _jump('/starred', '加星', star_n),
         _jump('/screenshots', '截图', shots_n),
         _jump('/screenrecords', '录屏', records_n),
         _jump('/docs', '文档', docs_n),
@@ -2238,9 +2289,8 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
     ]
     jump_parts = [
         '<a href="#" id="consoleLink">控制台</a>',
-        _jump('/starred', '加星', star_n),
         '<details class="jumps-more">'
-        '<summary>更多</summary>'
+        '<summary>图库</summary>'
         f'<div class="jumps-more-panel">{"".join(more_links)}</div>'
         '</details>',
     ]
@@ -2299,9 +2349,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(title)} — PicVault</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/400.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5.2.5/500.css">
+<title>{_esc(title)}｜PicVault</title>
 <style>{PAGE_CSS}</style>
 </head>
 <body>
@@ -2329,7 +2377,7 @@ def html_error_page(title: str, message: str) -> bytes:
     body = (
         f'<div class="page-head"><h2 class="page-title">{_esc(title)}</h2></div>'
         f'<div class="ledger"><div class="ledger-empty">{_esc(message)} '
-        f'<a href="/">回归档</a></div></div>'
+        f'<a href="/">回到归档</a></div></div>'
     )
     return page_shell(title, body, work=None, crumbs=[('首页', '/'), (title, '#')])
 
@@ -2353,9 +2401,9 @@ def _media_cell(f: Path, work: Path, thumb_root: Path, bucket: str,
         f'data-name="{_esc(f.name)}" data-video="{"1" if is_video else "0"}">'
     )
     if is_live_photo_still(f):
-        badge = '<span class="badge">Live</span>'
+        badge = '<span class="badge">实况</span>'
     elif is_video:
-        badge = '<span class="badge">VIDEO</span>'
+        badge = '<span class="badge">视频</span>'
     else:
         badge = ''
     star_cls = 'star on' if is_starred else 'star'
@@ -2387,7 +2435,7 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
     if context != 'screen':
         actions.append(
             '<button type="button" class="btn-reclass" data-reclassify="to_screen" disabled>'
-            '移至截图录屏</button>'
+            '移至截图与录屏</button>'
         )
     if context not in ('normal', 'theme'):
         actions.append(
@@ -2409,21 +2457,24 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         '移至回收站</button>'
     )
     filter_tip = (
-        '<span class="filter-tip" title="「仅加星」与格子筛选只作用于当前已加载的缩略图；'
-        '点「加载更多」或滚动到底可继续加载。">'
-        '筛选仅当前已加载</span>'
+        '<span class="filter-tip">先加载更多，再筛选；否则只看已显示的缩略图。</span>'
         if paginated else ''
     )
+    star_filter = ''
+    if context != 'starred':
+        star_filter = (
+            '<button type="button" class="chip" data-filter="starred">'
+            f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
+        )
     return (
         f'<div class="toolbar">'
-        f'<span class="count">{file_count} 个文件 · '
-        f'<span id="pageMetaStars">{star_count}</span> 已加星</span>'
+        f'<span class="count">文件 {file_count}｜'
+        f'加星 <span id="pageMetaStars">{star_count}</span></span>'
         f'<div class="toolbar-filters">'
         f'<button type="button" class="chip on" data-filter="all">全部</button>'
-        f'<button type="button" class="chip" data-filter="starred">'
-        f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
+        f'{star_filter}'
         f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
-        f'aria-pressed="false">选择</button>'
+        f'aria-pressed="false">批量选择</button>'
         f'{filter_tip}'
         f'</div>'
         f'<div class="toolbar-organize" aria-label="整理">'
@@ -2482,8 +2533,8 @@ def _gallery_sheet_html(
     if has_more:
         more = (
             '<div class="gallery-more" id="galleryMore">'
-            f'<p class="gallery-more-tip">已显示 {loaded} / {total}'
-            ' · 筛选仅作用于已加载</p>'
+            f'<p class="gallery-more-tip">已显示 {loaded} 个｜共 {total} 个'
+            '｜筛选只看已加载内容</p>'
             '<button type="button" class="btn-more" id="loadMoreBtn" data-load-more>'
             '加载更多</button>'
             '</div>'
@@ -2555,7 +2606,7 @@ def render_home(work: Path) -> bytes:
         n_default = sum(1 for m in months if not m.get('is_themed'))
         n_themed = sum(1 for m in months if m.get('is_themed'))
         if n_default and n_themed:
-            sub = f'{n_default} 个月 · {n_themed} 个主题'
+            sub = f'{n_default} 个月｜{n_themed} 个主题'
         elif n_themed:
             sub = f'{n_themed} 个主题'
         elif n_default:
@@ -2586,6 +2637,7 @@ def render_home(work: Path) -> bytes:
         f'<div class="page-head">'
         f'<div>'
         f'<h2 class="page-title">归档</h2>'
+        f'<p class="page-lede">按年份进入，再查看月份或主题桶。</p>'
         f'</div>'
         f'</div>'
         f'{ledger}'
@@ -2669,12 +2721,12 @@ def theme_ledger_sub(theme: dict) -> str:
         def short(d: str) -> str:
             m = re.match(r'^\d{4}-(\d{2})-(\d{2})$', d)
             if m:
-                return f'{int(m.group(1))}/{int(m.group(2))}'
+                return f'{int(m.group(1))}月{int(m.group(2))}日'
             return d
-        parts.append(f'{short(start)}–{short(end)}')
+        parts.append(f'{short(start)}到{short(end)}')
     elif start or end:
         parts.append(start or end)
-    return ' · '.join(parts) if parts else '—'
+    return '｜'.join(parts) if parts else '未设置周期'
 
 
 def theme_for_bucket(work: Path, bucket: str):
@@ -2711,8 +2763,8 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         theme = theme_for_bucket(work, month)
         if theme is not None:
             period = theme_ledger_sub(theme)
-            if period and period != '—':
-                meta = f'周期 {period}'
+            if period and period != '未设置周期':
+                meta = f'周期：{period}'
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">{_esc(display)}</h2>'
@@ -2722,7 +2774,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         f'{sheet}'
     )
     return page_shell(
-        f'{year}/{display}',
+        f'{year}｜{display}',
         body,
         work=work,
         crumbs=[
@@ -2744,7 +2796,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
-        f'<p class="page-meta">手机截图</p>'
+        f'<p class="page-meta">截图从归档中分出，适合快速清理。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -2768,7 +2820,7 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">录屏</h2>'
-        f'<p class="page-meta">屏幕录制</p>'
+        f'<p class="page-meta">录屏集中在这里，方便回看和删除。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -2792,7 +2844,7 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">文档</h2>'
-        f'<p class="page-meta">证件、票据等，手动移入</p>'
+        f'<p class="page-meta">证件、票据和纸面信息，需要从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated)}'
         f'{sheet}'
@@ -2816,7 +2868,7 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">物品</h2>'
-        f'<p class="page-meta">物品照片与视频，手动移入</p>'
+        f'<p class="page-meta">设备、包装和物件记录，需要从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated)}'
         f'{sheet}'
@@ -2836,12 +2888,12 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='starred',
-        empty_message='还没有加星。在各库里点 ★，或点「仅加星」筛选。',
+        empty_message='还没有加星。回到任意图库，点缩略图右上角的星标。',
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">加星</h2>'
-        f'<p class="page-meta">{len(entries)} 张已加星</p>'
+        f'<p class="page-meta">已加星 {len(entries)} 个；这里汇总所有桶里的精选。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated)}'
         f'{sheet}'
@@ -3923,11 +3975,11 @@ class Handler(BaseHTTPRequestHandler):
         bits = []
         sources = theme.get('sources')
         if isinstance(sources, list) and sources:
-            bits.append(' · '.join(str(s) for s in sources if str(s).strip()))
+            bits.append('｜'.join(str(s) for s in sources if str(s).strip()))
         files = theme.get('files')
         if isinstance(files, list) and files:
             bits.append(f'{len(files)} 个文件')
-        return ' · '.join(b for b in bits if b) or ''
+        return '｜'.join(b for b in bits if b) or ''
 
     def _render_themes(self) -> bytes:
         path = self.work / '_meta' / 'events.yaml'
@@ -3977,8 +4029,8 @@ class Handler(BaseHTTPRequestHandler):
             sync_one = _theme_sync_cmd(name) if str(t.get('name') or '').strip() else ''
             sync_btn = (
                 f'<button type="button" class="ledger-sync" data-sync-cmd="{_esc(sync_one)}" '
-                f'title="同步此主题：吸入/吐出本主题；不再匹配时可改派到其它主题。不改动其它主题桶里原有文件。">'
-                f'复制同步命令</button>'
+                f'aria-label="复制此主题试跑命令；不会搬文件，确认后再加 --yes。">'
+                f'复制试跑命令</button>'
                 if sync_one else ''
             )
             rows.append(
@@ -4011,16 +4063,14 @@ class Handler(BaseHTTPRequestHandler):
             )
             hint = ''
             fold_note = (
-                '<p class="events-fold-note">保存只写配置。改完后对该主题点'
-                '「复制同步命令」才会搬家（先 dry-run）。</p>'
+                '<p class="events-fold-note">保存只写配置，不搬文件。保存后回到主题行，先复制试跑命令；确认无误后再在终端加 --yes。</p>'
             )
             fold_open = ''
         else:
             ledger = f'<div class="ledger">{"".join(rows)}</div>'
             hint = ''
             fold_note = (
-                '<p class="events-fold-note">保存 ≠ 搬家。改配置 → 保存 → '
-                '该行「复制同步命令」（先 dry-run）。同步只扫本主题。</p>'
+                '<p class="events-fold-note">保存只写配置。真正搬文件前，先复制对应主题的试跑命令；看清计划后再加 --yes。</p>'
             )
             fold_open = ''
 
@@ -4045,7 +4095,7 @@ class Handler(BaseHTTPRequestHandler):
             '<div class="events-toolbar">'
             '<button type="button" class="primary" id="eventsSave">保存</button>'
             '<button type="button" id="eventsReload">重新加载</button>'
-            '<button type="button" id="eventsCopySyncAll">复制同步全部</button>'
+            '<button type="button" id="eventsCopySyncAll">复制全部试跑命令</button>'
             '<span class="events-status" id="eventsStatus"></span>'
             '</div>'
             f'<textarea id="eventsYaml" spellcheck="false">{_esc(text)}</textarea>'
@@ -4071,15 +4121,15 @@ class Handler(BaseHTTPRequestHandler):
             '  location.reload();\n'
             '});\n'
             'document.getElementById("eventsCopySyncAll").addEventListener("click",function(){\n'
-            '  if(!confirm("全量同步会按配置收敛每一个主题桶，可能覆盖手工调整。复制的是 dry-run 命令；确认后再加 --yes。仍要复制？"))return;\n'
-            '  copyCmd(syncAllCmd,"已复制同步全部（dry-run）；确认后加 --yes");\n'
+            '  if(!confirm("全量同步会检查每一个主题桶，可能覆盖手工调整。复制的是试跑命令，不会搬文件；确认后再加 --yes。仍要复制？"))return;\n'
+            '  copyCmd(syncAllCmd,"已复制全部试跑命令；确认后再加 --yes");\n'
             '});\n'
             'document.querySelectorAll(".ledger-sync").forEach(function(btn){\n'
             '  btn.addEventListener("click",function(e){\n'
             '    e.preventDefault();e.stopPropagation();\n'
             '    var cmd=btn.getAttribute("data-sync-cmd")||"";\n'
             '    if(!cmd){setStatus("无法生成同步命令","err");return;}\n'
-            '    copyCmd(cmd,"已复制该主题同步命令（dry-run）；确认后加 --yes 或去掉 --dry-run");\n'
+            '    copyCmd(cmd,"已复制该主题试跑命令；确认后再加 --yes");\n'
             '  });\n'
             '});\n'
             'saveBtn.addEventListener("click",async function(){\n'
@@ -4094,7 +4144,7 @@ class Handler(BaseHTTPRequestHandler):
             '      return;\n'
             '    }\n'
             '    initial=ta.value;\n'
-            '    setStatus("已保存 "+data.themes+" 个主题。点该行「复制同步命令」才会搬家。","ok");\n'
+            '    setStatus("已保存 "+data.themes+" 个主题。先复制试跑命令；确认后再搬文件。","ok");\n'
             '    setTimeout(function(){location.reload();},600);\n'
             '  }catch(e){setStatus(String(e),"err");if(fold)fold.open=true;}\n'
             '  finally{saveBtn.disabled=false;}\n'
