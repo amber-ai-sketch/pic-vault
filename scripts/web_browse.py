@@ -2698,10 +2698,18 @@ PAGE_JS = '''
       openLightbox(thumb);
       return;
     }
-    if (e.target.id === 'lbClose' || e.target.classList.contains('lb')) {
+    if (e.target.id === 'lbClose' || clickedLightboxBlank(e.target)) {
       closeLightbox();
     }
   });
+
+  function clickedLightboxBlank(target) {
+    if (!lb || !lb.classList.contains('open') || !target || !target.closest) return false;
+    if (!target.closest('.lb')) return false;
+    if (target.closest('.lb-bar')) return false;
+    if (target.closest('.lb-media img, .lb-media video')) return false;
+    return target.classList.contains('lb') || target.classList.contains('lb-media');
+  }
 
   function isTypingTarget(el) {
     if (!el || el === document || el === document.body) return false;

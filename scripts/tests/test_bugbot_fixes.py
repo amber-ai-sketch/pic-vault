@@ -2864,6 +2864,21 @@ def test_sticky_gallery_toolbar_title_stats_and_top_action():
         check('toolbar no longer uses old count block', 'class="count"' not in html)
 
 
+def test_lightbox_blank_area_click_closes_preview():
+    """Clicking lightbox blank space closes preview without closing on media/bar controls."""
+    print('\n33. Lightbox blank area closes preview')
+
+    check('PAGE_JS has blank close helper', 'function clickedLightboxBlank' in wb.PAGE_JS)
+    check('blank close accepts overlay', "classList.contains('lb')" in wb.PAGE_JS)
+    check('blank close accepts media backdrop', "classList.contains('lb-media')" in wb.PAGE_JS)
+    check('blank close excludes actual media', "closest('.lb-media img, .lb-media video')" in wb.PAGE_JS)
+    check('blank close excludes bottom bar', "closest('.lb-bar')" in wb.PAGE_JS)
+    check(
+        'blank close calls closeLightbox',
+        'clickedLightboxBlank(e.target)' in wb.PAGE_JS and 'closeLightbox();' in wb.PAGE_JS,
+    )
+
+
 def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
@@ -2912,6 +2927,7 @@ def main():
     test_large_gallery_month_groups_and_back_top()
     test_lightbox_video_controls_not_covered_by_action_bar()
     test_sticky_gallery_toolbar_title_stats_and_top_action()
+    test_lightbox_blank_area_click_closes_preview()
     print(f'\n{passed} passed, {failed} failed')
     sys.exit(1 if failed else 0)
 
