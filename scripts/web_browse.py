@@ -2184,6 +2184,12 @@ PAGE_JS = '''
   }
 
   var filterMode = 'all';
+  var galleryIO = null;
+  function galleryAutoLoadAllowed() {
+    // 「仅加星」会把未加星格子 display:none，#galleryMore 常留在视口内，
+    // 若仍自动续载会把整库 DOM 拉回，抵消分页收益。手动「加载更多」仍可用。
+    return filterMode === 'all';
+  }
   function applyFilter() {
     document.querySelectorAll('.cell').forEach(function (cell) {
       var show = filterMode === 'all' || cell.classList.contains('starred');
@@ -2231,7 +2237,13 @@ PAGE_JS = '''
           ? ('已显示 ' + next + ' 个｜共 ' + total + ' 个｜筛选只看已加载内容')
           : ('已全部加载 ' + total + ' 个');
       }
-      if (!data.has_more && btn) btn.hidden = true;
+      if (!data.has_more) {
+        if (btn) btn.hidden = true;
+        if (galleryIO) {
+          galleryIO.disconnect();
+          galleryIO = null;
+        }
+      }
       applyFilter();
     } catch (err) {
       toast('网络错误：' + err);
@@ -2245,12 +2257,14 @@ PAGE_JS = '''
     var more = document.getElementById('galleryMore');
     if (!more || !galleryStillPaging()) return;
     if ('IntersectionObserver' in window) {
-      var io = new IntersectionObserver(function (entries) {
+      if (galleryIO) galleryIO.disconnect();
+      galleryIO = new IntersectionObserver(function (entries) {
+        if (!galleryAutoLoadAllowed()) return;
         if (entries.some(function (e) { return e.isIntersecting; })) {
           loadMoreGallery();
         }
       }, { rootMargin: '240px 0px' });
-      io.observe(more);
+      galleryIO.observe(more);
     }
   }
 

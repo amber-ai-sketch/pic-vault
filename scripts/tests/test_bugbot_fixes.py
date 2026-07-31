@@ -1888,16 +1888,15 @@ def test_theme_add_files_cli_and_list():
     print('\n25b. add_theme CLI accepts --files and list shows it')
     import rename_organize as ro
 
-    allowed_root = Path('/Users/ym/Downloads/pic-test')
-    allowed_root.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=allowed_root) as tmp:
+    with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
         meta = work / '_meta'
         meta.mkdir(parents=True)
         events = meta / 'events.yaml'
         events.write_text('themes: []\n', encoding='utf-8')
 
+        env = os.environ.copy()
+        env['DUPEGURU_TEST'] = '1'
         add_proc = subprocess.run(
             [
                 sys.executable,
@@ -1909,6 +1908,7 @@ def test_theme_add_files_cli_and_list():
             ],
             capture_output=True,
             text=True,
+            env=env,
         )
         check('add_theme --files exit 0', add_proc.returncode == 0, detail=add_proc.stderr)
 
@@ -1921,7 +1921,6 @@ def test_theme_add_files_cli_and_list():
             detail=repr(themes),
         )
 
-        env = os.environ.copy()
         env['WORK'] = str(work)
         env['PICVAULT_TEST'] = '1'
         list_proc = subprocess.run(
@@ -1938,10 +1937,7 @@ def test_theme_remove_cli_without_yaml():
     print('\n25c. picvault theme remove works without PyYAML')
     import rename_organize as ro
 
-    allowed_root = Path('/Users/ym/Downloads/pic-test')
-    allowed_root.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(dir=allowed_root) as tmp:
+    with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
         meta = work / '_meta'
         meta.mkdir(parents=True)
@@ -1965,6 +1961,7 @@ def test_theme_remove_cli_without_yaml():
         env = os.environ.copy()
         env['WORK'] = str(work)
         env['PICVAULT_TEST'] = '1'
+        env['DUPEGURU_TEST'] = '1'
         rm_proc = subprocess.run(
             [str(PICVAULT), 'theme', 'remove', '旧主题'],
             capture_output=True,
@@ -2370,6 +2367,18 @@ def test_gallery_pagination():
     check(
         'filter tip copy',
         '先加载更多，再筛选' in wb._gallery_toolbar(1, 0, paginated=True),
+    )
+    # Starred filter hides non-star cells (display:none), so #galleryMore stays in
+    # viewport and IntersectionObserver would otherwise cascade-load the whole library.
+    check(
+        'IO auto-load has galleryAutoLoadAllowed gate',
+        'function galleryAutoLoadAllowed' in wb.PAGE_JS
+        and 'galleryAutoLoadAllowed()' in wb.PAGE_JS,
+        detail='IntersectionObserver must not auto-load while 「仅加星」 is active',
+    )
+    check(
+        'IO disconnects when paging ends',
+        'galleryIO' in wb.PAGE_JS and 'galleryIO.disconnect()' in wb.PAGE_JS,
     )
 
     with tempfile.TemporaryDirectory() as tmp:
