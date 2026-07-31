@@ -2578,7 +2578,7 @@ def test_gallery_pagination():
         )
         check('screenshots has load more', 'data-load-more' in html and '加载更多' in html)
         check('screenshots hides filter tip', '先加载更多，再筛选' not in html)
-        check('screenshots count shows total', f'文件 {n}' in html)
+        check('screenshots count shows total', f'id="fileCount">{n}</span>' in html)
         # list_screenshots sorts by mtime desc → newest (n-1) on page 1; oldest (0) on last page
         check(
             'first page includes newest file',
@@ -2853,8 +2853,10 @@ def test_sticky_gallery_toolbar_title_stats_and_top_action():
         toolbar_pos = html.find('<div class="toolbar">')
         sheet_pos = html.find('<div class="sheet"')
         back_top_pos = html.find('id="backTopBtn"')
-        check('toolbar shows folder title', 'toolbar-title' in html and '截图' in html)
-        check('toolbar merges file stats with title', 'toolbar-meta' in html and '文件 151' in html)
+        check('toolbar shows folder title only on left', 'toolbar-title' in html and '截图' in html)
+        check('toolbar moves file count into all chip', '全部<span class="n" id="fileCount">151</span>' in html)
+        check('toolbar keeps star count in starred chip', '仅加星<span class="n" id="starCount">0</span>' in html)
+        check('toolbar has no left stats block', 'toolbar-meta' not in html and 'pageMetaStars' not in html)
         check(
             'toolbar has inline back top button',
             'class="chip back-top"' in html and toolbar_pos < back_top_pos < sheet_pos,

@@ -1352,9 +1352,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .toolbar-main {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 12px;
+  align-items: center;
   margin-right: auto;
   min-width: 12rem;
 }
@@ -1364,12 +1362,6 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   font-weight: 600;
   color: var(--ink);
   letter-spacing: -0.025em;
-}
-.toolbar-meta {
-  font-family: var(--sans);
-  font-size: var(--text-xs);
-  color: var(--muted);
-  letter-spacing: 0;
 }
 .toolbar-filters {
   display: flex;
@@ -2139,8 +2131,6 @@ PAGE_JS = '''
     if (el) el.textContent = String(Math.max(0, n));
     var chipN = document.querySelector('[data-filter="starred"] .n');
     if (chipN) chipN.textContent = String(Math.max(0, n));
-    var meta = document.getElementById('pageMetaStars');
-    if (meta) meta.textContent = String(Math.max(0, n));
   }
 
   async function toggleStar(btn) {
@@ -2210,8 +2200,6 @@ PAGE_JS = '''
     if (el) el.textContent = String(n);
     var chipN = document.querySelector('[data-filter="starred"] .n');
     if (chipN) chipN.textContent = String(n);
-    var meta = document.getElementById('pageMetaStars');
-    if (meta) meta.textContent = String(n);
   }
 
   function setSelectMode(on) {
@@ -3063,11 +3051,10 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         f'<div class="toolbar">'
         f'<div class="toolbar-main">'
         f'<span class="toolbar-title">{title_html}</span>'
-        f'<span class="toolbar-meta">文件 {file_count}｜'
-        f'加星 <span id="pageMetaStars">{star_count}</span></span>'
         f'</div>'
         f'<div class="toolbar-filters">'
-        f'<button type="button" class="chip on" data-filter="all">全部</button>'
+        f'<button type="button" class="chip on" data-filter="all">'
+        f'全部<span class="n" id="fileCount">{file_count}</span></button>'
         f'{star_filter}'
         f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
         f'aria-pressed="false">批量选择</button>'
