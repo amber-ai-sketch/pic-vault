@@ -84,16 +84,18 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 8px 12px;
     font-size: var(--text-xs);
     color: var(--muted);
+    min-width: 0;
+    width: 100%;
   }
   .web-status-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-family: var(--mono);
+    font-family: var(--sans);
     font-size: var(--text-xs);
     letter-spacing: 0.02em;
   }
@@ -104,10 +106,28 @@
   .dot.running { background: var(--live); }
   .dot.stopped { background: #C9C5B8; }
   #openWebBtn { display: none; }
-  body.web-live #openWebBtn { display: inline-block; }
-  .web-status .btn-row { margin-top: 0; justify-content: flex-end; }
+  body.web-live #openWebBtn { display: inline-flex; }
+  .web-status .btn-row { margin-top: 0; justify-content: flex-start; }
+  .web-status #openWebBtn {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: 400;
+    line-height: 1.2;
+  }
+  .web-status #openWebBtn:hover:not(:disabled) {
+    background: transparent;
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
   /* Offline: alert below owns the CTA; header keeps brand only */
   body:not(.web-live) .web-status { display: none; }
+
+  .library-section .section-head > div { width: 100%; }
+  .library-section .web-status { margin-top: 8px; }
 
   .section { margin-top: 40px; }
   .library-section {
@@ -168,40 +188,51 @@
   .path-chip .v {
     font-family: var(--mono);
     font-size: var(--text-xs);
-    word-break: break-all;
+    overflow-wrap: anywhere;
   }
   .paths-root-hint {
     margin: 0;
     font-family: var(--mono);
     font-size: var(--text-xs);
     color: var(--muted);
-    word-break: break-all;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
   }
   .service-command {
     margin-top: 14px;
     padding-top: 14px;
     border-top: 1px solid var(--line);
   }
-  .service-command-head {
+  .service-command > summary {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 10px;
-    margin-bottom: 8px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .service-command > summary::-webkit-details-marker { display: none; }
+  .service-command-summary { min-width: 0; }
+  .service-command-toggle {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .service-command-toggle::before { content: "展开"; }
+  .service-command[open] .service-command-toggle::before { content: "收起"; }
+  .service-command-body {
+    margin-top: 10px;
+  }
+  .service-command-body .btn-row {
+    margin: 0 0 8px;
+    justify-content: flex-start;
   }
   .service-command-title {
     margin: 0;
     font-size: var(--text-xs);
-    font-weight: 500;
-    color: var(--ink);
-  }
-  .service-command-note {
-    margin: 0 0 8px;
-    font-size: var(--text-xs);
+    font-weight: 400;
     color: var(--muted);
-    line-height: 1.45;
   }
-
   .path-line {
     display: grid;
     grid-template-columns: 7.5em 1fr;
@@ -951,15 +982,14 @@
     <div class="section-head">
       <div>
         <p class="section-label">图库</p>
-        <p class="section-title">当前库概览</p>
-      </div>
-      <div class="web-status">
-        <div class="web-status-row">
-          <span class="dot stopped" id="webDot"></span>
-          <span id="webStatus">检查中</span>
-        </div>
-        <div class="btn-row">
-          <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
+        <div class="web-status">
+          <div class="web-status-row">
+            <span class="dot stopped" id="webDot"></span>
+            <span id="webStatus">检查中</span>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1063,14 +1093,20 @@
         <button type="button" class="ghost" id="pathsCancelBtn" onclick="cancelEditPaths()" style="display:none">取消</button>
       </div>
     </form>
-    <div class="service-command" aria-label="重启 Web 服务">
-      <div class="service-command-head">
-        <p class="service-command-title">重启 Web 服务</p>
-        <button type="button" class="ghost" id="webRestartCopyBtn" onclick="copyText('webRestartCmd', this)">复制命令</button>
+    <details class="service-command" aria-label="重启 Web 服务">
+      <summary>
+        <span class="service-command-summary">
+          <span class="service-command-title">重启 Web 服务</span>
+        </span>
+        <span class="service-command-toggle" aria-hidden="true"></span>
+      </summary>
+      <div class="service-command-body">
+        <div class="btn-row">
+          <button type="button" class="ghost" id="webRestartCopyBtn" onclick="copyText('webRestartCmd', this)">复制命令</button>
+        </div>
+        <code class="cmd" id="webRestartCmd">保存路径后生成重启命令。</code>
       </div>
-      <p class="service-command-note" id="webRestartNote">改完代码或切换工作盘后使用。</p>
-      <code class="cmd" id="webRestartCmd">保存路径后生成重启命令。</code>
-    </div>
+    </details>
   </section>
 
     </aside>
@@ -1099,7 +1135,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">先建目录骨架。</p>
+        <p class="step-callout">先建目录骨架</p>
         <p class="step-desc">只建 by-date、_meta、thumbs 等目录，不会动 inbox 里的文件。第一次使用先跑 00。</p>
         <p class="step-status" id="initStatusLine">状态：检测中…</p>
         <details class="cmd-fold">
@@ -1127,7 +1163,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">把素材先放进 inbox。</p>
+        <p class="step-callout">把素材先放进 inbox</p>
         <p class="step-desc">把照片、视频从 Finder 拖到 <code id="inboxPath"></code>，可以直接带子文件夹。</p>
       </div>
 
@@ -1144,7 +1180,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">先试跑，确认重复项。</p>
+        <p class="step-callout">先试跑，确认重复项</p>
         <p class="step-desc">按文件内容找完全重复的文件；每组只保留体积最大的一份，其余移到 <code>_trash/</code>，可找回。</p>
         <p class="step-status" id="dedupeStepStatus"></p>
         <details class="cmd-fold">
@@ -1174,7 +1210,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">按拍摄时间整理。</p>
+        <p class="step-callout">按拍摄时间整理</p>
         <p class="step-desc">按拍摄时间重命名。照片、视频进 <code>by-date/</code>，截图进 <code>screenshots/</code>，录屏进 <code>screenrecords/</code>；文件会从 <code>inbox/</code> 搬走。</p>
         <p class="step-status" id="renameStepStatus"></p>
         <details class="cmd-fold">
@@ -1203,7 +1239,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">先看一遍，再决定要不要同步。</p>
+        <p class="step-callout">先看一遍，再决定要不要同步</p>
         <p class="step-desc">打开本地 Web 核对结果，顺手加星、纠错；确认没问题后再去 05。</p>
         <p class="step-status" id="webStepStatus"></p>
         <div class="btn-row">
@@ -1225,7 +1261,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout">把工作盘镜像到备份盘。</p>
+        <p class="step-callout">把工作盘镜像到备份盘</p>
         <p class="step-desc">默认只新增、不删除现有文件；重复跑也可以，先确认 WORK 和 BACKUP 都已挂载。</p>
         <p class="step-status" id="syncStepStatus"></p>
         <details class="cmd-fold">
@@ -1254,7 +1290,7 @@
             </span>
           </button>
         </div>
-        <p class="step-callout danger">一次跑完 02、03、05；不确定就别点。</p>
+        <p class="step-callout danger">一次跑完 02、03、05；不确定就别点</p>
         <p class="step-desc">这一步会连续执行去重、归档、同步；适合已经熟悉流程时用，不确定就分开跑。</p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -1528,10 +1564,24 @@ function fillPathInputs(p) {
   refreshProjectRootDisplay();
 }
 
+function compactProjectRootPath(path) {
+  const value = String(path || '').trim();
+  if (!value) return '';
+  const homePrefix = '/Users/ym/';
+  if (value.startsWith(homePrefix)) {
+    return '~/' + value.slice(homePrefix.length);
+  }
+  const parts = value.split('/').filter(Boolean);
+  if (parts.length <= 2 || value.length <= 28) return value;
+  return '…/' + parts.slice(-2).join('/');
+}
+
 function updatePathsSummary() {
   const root = paths.projectRoot;
   const sumRoot = document.getElementById('sumProjectRoot');
-  sumRoot.textContent = 'PROJECT_ROOT：' + root + (detectProjectRoot() ? '（自动）' : '');
+  const rootSuffix = detectProjectRoot() ? '（自动）' : '';
+  sumRoot.textContent = 'PROJECT_ROOT：' + compactProjectRootPath(root) + rootSuffix;
+  sumRoot.title = root;
   document.getElementById('sumWork').textContent = paths.work;
   document.getElementById('sumBackup').textContent = paths.backup;
   document.body.classList.toggle('paths-ready', isConfigured(paths));
@@ -1540,17 +1590,14 @@ function updatePathsSummary() {
 
 function updateWebRestartCommand() {
   const cmd = document.getElementById('webRestartCmd');
-  const note = document.getElementById('webRestartNote');
   const copyBtn = document.getElementById('webRestartCopyBtn');
   if (!cmd) return;
   if (!isConfigured(paths)) {
     cmd.textContent = '保存路径后生成重启命令。';
-    if (note) note.textContent = '改完代码或切换工作盘后使用。';
     if (copyBtn) copyBtn.disabled = true;
     return;
   }
   cmd.textContent = CMDS.restart || '';
-  if (note) note.textContent = '改完代码或切换工作盘后使用。';
   if (copyBtn) copyBtn.disabled = false;
 }
 
