@@ -471,22 +471,22 @@ def test_ledger_star_live_counts():
         stats = wb.format_ledger_stats(2, 1, 2, 1)
         check(
             'format_ledger_stats includes 加星 + Live',
-            stats == '2 张 · 1 视频 · 2 加星 · 1 Live',
+            stats == '照片 2｜视频 1｜加星 2｜实况 1',
             detail=stats,
         )
         check(
             'format_ledger_stats omits zero star/Live',
-            wb.format_ledger_stats(3, 0, 0, 0) == '3 张 · 0 视频',
+            wb.format_ledger_stats(3, 0, 0, 0) == '照片 3｜视频 0',
         )
 
         year_html = wb.render_year(work, '2026').decode('utf-8')
-        check('render_year shows 加星', '2 加星' in year_html)
-        check('render_year shows Live', '1 Live' in year_html)
-        check('render_year keeps photos/videos', '2 张 · 1 视频' in year_html)
+        check('render_year shows 加星', '加星 2' in year_html)
+        check('render_year shows Live', '实况 1' in year_html)
+        check('render_year keeps photos/videos', '照片 2｜视频 1' in year_html)
 
         home_html = wb.render_home(work).decode('utf-8')
-        check('render_home year totals include 加星', '2 加星' in home_html)
-        check('render_home year totals include Live', '1 Live' in home_html)
+        check('render_home year totals include 加星', '加星 2' in home_html)
+        check('render_home year totals include Live', '实况 1' in home_html)
 
 
 def test_events_api_edit():
@@ -1536,12 +1536,12 @@ def test_theme_bucket_shows_date_range():
         check('theme bucket shows period label', '周期' in theme_html)
         check(
             'theme bucket shows short date range',
-            '11/1–11/1' in theme_html,
-            detail='expected 11/1–11/1 in page-meta',
+            '11月1日到11月1日' in theme_html,
+            detail='expected 11月1日到11月1日 in page-meta',
         )
         check(
             'theme bucket shows month in period',
-            '2025-11' in theme_html and '周期 2025-11 · 11/1–11/1' in theme_html,
+            '2025-11' in theme_html and '周期：2025-11｜11月1日到11月1日' in theme_html,
         )
 
         default_html = wb.render_bucket(
@@ -1565,7 +1565,7 @@ def test_theme_bucket_shows_date_range():
         ).decode('utf-8')
         check(
             'sources-only theme falls back to month',
-            '<p class="page-meta">周期 2026-08</p>' in sources_html,
+            '<p class="page-meta">周期：2026-08</p>' in sources_html,
         )
         check(
             'sources-only has no date-range short form',
@@ -1707,6 +1707,110 @@ def test_theme_start_month_reassign_and_validate():
             },
         )
         check('add_theme accepts month==start', ok.get('month') == '2026-07')
+
+
+def test_theme_add_files_cli_and_list():
+    print('\n25b. add_theme CLI accepts --files and list shows it')
+    import rename_organize as ro
+
+    allowed_root = Path('/Users/ym/Downloads/pic-test')
+    allowed_root.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(dir=allowed_root) as tmp:
+        work = Path(tmp) / 'work'
+        meta = work / '_meta'
+        meta.mkdir(parents=True)
+        events = meta / 'events.yaml'
+        events.write_text('themes: []\n', encoding='utf-8')
+
+        add_proc = subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / 'scripts' / 'add_theme.py'),
+                '--work', str(work),
+                '--name', '证件照',
+                '--month', '2026-06',
+                '--files', 'id-1.jpg,id-2.jpg',
+            ],
+            capture_output=True,
+            text=True,
+        )
+        check('add_theme --files exit 0', add_proc.returncode == 0, detail=add_proc.stderr)
+
+        themes = ro.parse_events_yaml_text(events.read_text(encoding='utf-8'))
+        check(
+            'add_theme --files saved list',
+            len(themes) == 1
+            and themes[0].get('name') == '证件照'
+            and themes[0].get('files') == ['id-1.jpg', 'id-2.jpg'],
+            detail=repr(themes),
+        )
+
+        env = os.environ.copy()
+        env['WORK'] = str(work)
+        env['PICVAULT_TEST'] = '1'
+        list_proc = subprocess.run(
+            [str(PICVAULT), 'theme', 'list'],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        check('picvault theme list exit 0', list_proc.returncode == 0, detail=list_proc.stderr)
+        check('picvault theme list shows files count', 'files=2' in list_proc.stdout, detail=list_proc.stdout)
+
+
+def test_theme_remove_cli_without_yaml():
+    print('\n25c. picvault theme remove works without PyYAML')
+    import rename_organize as ro
+
+    allowed_root = Path('/Users/ym/Downloads/pic-test')
+    allowed_root.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(dir=allowed_root) as tmp:
+        work = Path(tmp) / 'work'
+        meta = work / '_meta'
+        meta.mkdir(parents=True)
+        events = meta / 'events.yaml'
+        original = (
+            'themes:\n'
+            '  - name: 旧主题\n'
+            '    month: 2025-01\n'
+            '    sources: [iphone]\n'
+            '  - name: 保留主题\n'
+            '    month: 2025-02\n'
+            '    date_range:\n'
+            '      start: 2025-02-01\n'
+            '      end:   2025-02-03\n'
+            '    sources: [canon]\n'
+            '    files:\n'
+            '      - keep.jpg\n'
+        )
+        events.write_text(original, encoding='utf-8')
+
+        env = os.environ.copy()
+        env['WORK'] = str(work)
+        env['PICVAULT_TEST'] = '1'
+        rm_proc = subprocess.run(
+            [str(PICVAULT), 'theme', 'remove', '旧主题'],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        check('theme remove exit 0', rm_proc.returncode == 0, detail=rm_proc.stderr)
+        check('theme remove output mentions backup', 'events.yaml.bak' in rm_proc.stdout, detail=rm_proc.stdout)
+
+        bak = events.with_name('events.yaml.bak')
+        check('theme remove wrote backup', bak.is_file() and bak.read_text(encoding='utf-8') == original)
+
+        themes = ro.parse_events_yaml_text(events.read_text(encoding='utf-8'))
+        names = [t.get('name') for t in themes]
+        check('theme remove keeps remaining', names == ['保留主题'], detail=repr(names))
+        check(
+            'theme remove preserves date_range',
+            themes[0].get('date_range') == {'start': '2025-02-01', 'end': '2025-02-03'},
+            detail=repr(themes[0]),
+        )
+        check('theme remove preserves files', themes[0].get('files') == ['keep.jpg'])
 
 
 def test_web_path_traversal_and_cors_hardening():
@@ -2074,7 +2178,7 @@ def test_gallery_pagination():
     check('PAGE_JS has /api/gallery', '/api/gallery' in wb.PAGE_JS)
     check(
         'filter tip copy',
-        '筛选仅当前已加载' in wb._gallery_toolbar(1, 0, paginated=True),
+        '先加载更多，再筛选' in wb._gallery_toolbar(1, 0, paginated=True),
     )
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -2098,8 +2202,8 @@ def test_gallery_pagination():
             detail=f'cells={cell_n} page={wb.GALLERY_PAGE_SIZE} total={n}',
         )
         check('screenshots has load more', 'data-load-more' in html and '加载更多' in html)
-        check('screenshots has filter tip', '筛选仅当前已加载' in html)
-        check('screenshots count shows total', f'{n} 个文件' in html)
+        check('screenshots has filter tip', '先加载更多，再筛选' in html)
+        check('screenshots count shows total', f'文件 {n}' in html)
         # list_screenshots sorts by mtime desc → newest (n-1) on page 1; oldest (0) on last page
         check(
             'first page includes newest file',
@@ -2237,6 +2341,8 @@ def main():
     test_theme_href_never_falls_back_to_default_month()
     test_theme_bucket_shows_date_range()
     test_theme_start_month_reassign_and_validate()
+    test_theme_add_files_cli_and_list()
+    test_theme_remove_cli_without_yaml()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()
