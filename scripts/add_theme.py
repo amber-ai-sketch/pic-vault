@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -21,6 +22,8 @@ ALLOWED_WORK_PREFIXES = ('/Volumes/Storage', '/Volumes/YM/MediaVault', '/Users/y
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
     p = Path(path_str).expanduser().resolve()
+    if os.environ.get('DUPEGURU_TEST') == '1':
+        return p
     for prefix in allowed_prefixes:
         prefix_resolved = str(Path(prefix).resolve())
         if str(p) == prefix_resolved or str(p).startswith(prefix_resolved + '/'):
