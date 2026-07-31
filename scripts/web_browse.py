@@ -1511,7 +1511,7 @@ body.select-mode .toolbar-organize { display: flex; }
 .back-top {
   position: fixed;
   right: clamp(18px, 4vw, 44px);
-  bottom: clamp(18px, 4vw, 38px);
+  top: calc(env(safe-area-inset-top) + 96px);
   z-index: 30;
   padding: 9px 14px;
   border: 1px solid var(--line);
@@ -1522,7 +1522,7 @@ body.select-mode .toolbar-organize { display: flex; }
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(8px);
+  transform: translateY(-8px);
   transition: opacity .16s ease, transform .16s ease, border-color .12s ease;
   box-shadow: 0 10px 30px rgba(20,20,20,0.08);
 }

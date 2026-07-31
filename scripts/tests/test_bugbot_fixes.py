@@ -2780,6 +2780,13 @@ def test_large_gallery_month_groups_and_back_top():
         check('large gallery shows July divider', '2026 年 7 月' in html)
         check('large gallery first page omits unloaded June divider', '2026 年 6 月' not in html)
         check('large gallery has back top button', 'id="backTopBtn"' in html and '返回顶部' in html)
+        back_top_css = re.search(r'\.back-top \{(?P<body>.*?)\n\}', wb.PAGE_CSS, re.S)
+        back_top_body = back_top_css.group('body') if back_top_css else ''
+        check(
+            'back top floats above bottom paging area',
+            'top:' in back_top_body and 'bottom:' not in back_top_body,
+            detail=back_top_body.strip(),
+        )
 
         page2 = wb.build_gallery_page_payload(
             work, thumbs, 'screenshots', offset=wb.GALLERY_PAGE_SIZE,
