@@ -2035,7 +2035,7 @@ PAGE_JS = '''
       var thumb = cell.querySelector('[data-lightbox]');
       name = thumb ? (thumb.getAttribute('data-name') || '') : '';
     }
-    if (!confirm('删除当前文件？\n' + (name || path) + '\n\n会移到 _trash/（可找回，不是永久删除）。')) return;
+    if (!confirm('删除当前文件？\\n' + (name || path) + '\\n\\n会移到 _trash/（可找回，不是永久删除）。')) return;
     var items = visibleLightboxThumbs();
     var idx = 0;
     for (var i = 0; i < items.length; i++) {

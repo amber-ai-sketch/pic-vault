@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,22 @@ def check(name, cond, detail=''):
     else:
         print(f'  ✗ FAIL: {name}' + (f' — {detail}' if detail else ''))
         failed += 1
+
+
+def check_page_js_syntax():
+    node = shutil.which('node')
+    if not node:
+        check('PAGE_JS syntax check skipped (node missing)', True)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        js_path = Path(tmp) / 'page.js'
+        js_path.write_text(wb.PAGE_JS, encoding='utf-8')
+        proc = subprocess.run(
+            [node, '--check', str(js_path)],
+            capture_output=True,
+            text=True,
+        )
+    check('PAGE_JS parses as JavaScript', proc.returncode == 0, detail=proc.stderr)
 
 
 def test_dashboard_pipeline_button():
@@ -79,6 +96,7 @@ def test_dashboard_web_start_copy():
 def test_gallery_menu_counts_and_dismissal():
     print('\n1c. Gallery menu shows theme count and closes on outside click')
     js = wb.PAGE_JS
+    check_page_js_syntax()
     check(
         'gallery menu outside click handler',
         'document.querySelectorAll(\'.jumps-more[open]\')' in js
@@ -307,6 +325,8 @@ def test_star_api_and_lightbox_sync():
     check('lightbox pick syncs gallery cell', 'setPathPicked(path, true)' in js)
     check('lightbox has single delete', 'function trashLightboxCurrent' in js and 'class="lb-trash"' in js)
     check('lightbox delete posts one path', 'JSON.stringify({ paths: [path] })' in js)
+    check('lightbox delete confirm uses escaped newlines', "删除当前文件？\\n' + (name || path) + '\\n\\n会移到 _trash/" in js)
+    check('lightbox delete confirm has no literal newline', "删除当前文件？\n' + (name || path)" not in js)
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
