@@ -99,6 +99,8 @@ The dashboard shows:
 - Run 日志落在 `_meta/logs/runs/`，dashboard 可回看/断线续看；长任务不限时
 - Copy command to start Web UI from terminal, plus stop/open controls
 
+The Web UI opens to a gallery overview. The year/month archive is shown as `年月` at `/by-date`; screenshots, recordings, docs, things, starred items, themes, and trash count are separate overview entries.
+
 ## Installation
 
 ```bash

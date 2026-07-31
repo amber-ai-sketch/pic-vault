@@ -1123,6 +1123,80 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   text-transform: uppercase;
 }
 
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+.home-card {
+  min-height: 150px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+}
+.home-card[href]:hover {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.05);
+  text-decoration: none;
+}
+.home-card-primary {
+  grid-column: span 2;
+  background: var(--ink);
+  color: #fff;
+}
+.home-card-disabled {
+  background: var(--mist);
+  color: var(--muted);
+}
+.home-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.home-card-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.home-card-count {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.home-card-primary .home-card-count { color: rgba(255,255,255,0.72); }
+.home-card-desc {
+  margin: auto 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--muted);
+}
+.home-card-primary .home-card-desc { color: rgba(255,255,255,0.76); }
+.home-card-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: 1.55;
+}
+.home-card-primary .home-card-meta { color: rgba(255,255,255,0.72); }
+.home-card-go {
+  align-self: flex-end;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: inherit;
+}
+@media (max-width: 700px) {
+  .home-card-primary { grid-column: span 1; }
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1953,6 +2027,7 @@ PAGE_JS = '''
   }
 
   var galleryShortcutPaths = {
+    '/by-date': true,
     '/starred': true,
     '/screenshots': true,
     '/screenrecords': true,
@@ -2423,7 +2498,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             crumb_parts.append(f'<a class="here" href="{_esc(href or "#")}">{_esc(label)}</a>')
 
     # Counts for top jumps (avoid repeating a footer link dump on home)
-    shots_n = records_n = docs_n = things_n = 0
+    by_date_n = shots_n = records_n = docs_n = things_n = 0
     if work is not None:
         if buckets is None or star_n is None:
             cached_star, cached_buckets = get_topbar_stats(work)
@@ -2432,6 +2507,8 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
             if buckets is None:
                 buckets = cached_buckets
         star_n = int(star_n or 0)
+        totals = _by_date_totals(buckets)
+        by_date_n = totals['photos'] + totals['videos']
         shots_n = int(buckets.get('screenshots_count') or 0)
         records_n = int(buckets.get('screenrecords_count') or 0)
         docs_n = int(buckets.get('docs_count') or 0)
@@ -2450,6 +2527,7 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         )
 
     more_links = [
+        _jump('/by-date', '年月', by_date_n),
         _jump('/starred', '加星', star_n),
         _jump('/screenshots', '截图', shots_n),
         _jump('/screenrecords', '录屏', records_n),
@@ -2547,7 +2625,7 @@ def html_error_page(title: str, message: str) -> bytes:
     body = (
         f'<div class="page-head"><h2 class="page-title">{_esc(title)}</h2></div>'
         f'<div class="ledger"><div class="ledger-empty">{_esc(message)} '
-        f'<a href="/">回到归档</a></div></div>'
+        f'<a href="/">回到图库</a></div></div>'
     )
     return page_shell(title, body, work=None, crumbs=[('首页', '/'), (title, '#')])
 
@@ -2762,7 +2840,80 @@ def build_gallery_page_payload(
     }
 
 
+def _by_date_totals(buckets: dict) -> dict:
+    years = buckets.get('years') or {}
+    months = [m for year_months in years.values() for m in year_months]
+    return {
+        'years': len(years),
+        'months': sum(1 for m in months if not m.get('is_themed')),
+        'themes': sum(1 for m in months if m.get('is_themed')),
+        'photos': sum(int(m.get('photos') or 0) for m in months),
+        'videos': sum(int(m.get('videos') or 0) for m in months),
+        'stars': sum(int(m.get('stars') or 0) for m in months),
+        'lives': sum(int(m.get('lives') or 0) for m in months),
+    }
+
+
+def _home_card(label: str, count: int, desc: str, href: str = None,
+               meta: str = '', primary: bool = False) -> str:
+    cls = 'home-card home-card-primary' if primary else 'home-card'
+    if href:
+        tag = 'a'
+        attrs = f' href="{_esc(href)}"'
+        go = '<span class="home-card-go" aria-hidden="true">›</span>'
+    else:
+        tag = 'div'
+        cls += ' home-card-disabled'
+        attrs = ' aria-disabled="true"'
+        go = ''
+    meta_html = f'<div class="home-card-meta">{_esc(meta)}</div>' if meta else ''
+    return (
+        f'<{tag} class="{cls}"{attrs}>'
+        f'<div class="home-card-top">'
+        f'<span class="home-card-name">{_esc(label)}</span>'
+        f'<span class="home-card-count">{int(count)} 项</span>'
+        f'</div>'
+        f'<p class="home-card-desc">{_esc(desc)}</p>'
+        f'{meta_html}'
+        f'{go}'
+        f'</{tag}>'
+    )
+
+
 def render_home(work: Path) -> bytes:
+    star_n, buckets = get_topbar_stats(work)
+    totals = _by_date_totals(buckets)
+    by_date_n = totals['photos'] + totals['videos']
+    trash_n = count_files_in(work / '_trash')
+    by_date_meta = (
+        f"{totals['years']} 年｜{totals['months']} 个月｜{totals['themes']} 主题｜"
+        f"{format_ledger_stats(totals['photos'], totals['videos'], totals['stars'], totals['lives'])}"
+    )
+    cards = [
+        _home_card('年月', by_date_n, '按年份和月份浏览普通照片/视频。', '/by-date', by_date_meta, primary=True),
+        _home_card('加星', star_n, '所有已收藏的照片和视频。', '/starred'),
+        _home_card('截图', buckets.get('screenshots_count') or 0, '截图集中清理和复核。', '/screenshots'),
+        _home_card('录屏', buckets.get('screenrecords_count') or 0, '屏幕录制视频集中回看。', '/screenrecords'),
+        _home_card('文档', buckets.get('docs_count') or 0, '证件、票据和纸面信息。', '/docs'),
+        _home_card('物品', buckets.get('things_count') or 0, '设备、包装和物件记录。', '/things'),
+        _home_card('主题', buckets.get('themes_count') or 0, '旅行和事件的主题桶配置。', '/themes'),
+        _home_card('回收站', trash_n, '软删除暂存，不参与备份。'),
+    ]
+    body = (
+        '<div class="page-head">'
+        '<div>'
+        '<h2 class="page-title">图库</h2>'
+        '<p class="page-lede">选择一个文件夹继续浏览或整理。</p>'
+        '</div>'
+        '</div>'
+        f'<section class="home-grid" aria-label="图库文件夹">{"".join(cards)}</section>'
+    )
+    return page_shell(
+        '图库', body, work=work, crumbs=[], buckets=buckets, star_n=star_n,
+    )
+
+
+def render_by_date_home(work: Path) -> bytes:
     # One cached scan for ledger + topbar (page_shell reuses buckets/star_n).
     star_n, buckets = get_topbar_stats(work)
     years = sorted(buckets['years'].keys(), reverse=True)
@@ -2806,14 +2957,16 @@ def render_home(work: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<div>'
-        f'<h2 class="page-title">归档</h2>'
+        f'<h2 class="page-title">年月</h2>'
         f'<p class="page-lede">按年份进入，再查看月份或主题桶。</p>'
         f'</div>'
         f'</div>'
         f'{ledger}'
     )
     return page_shell(
-        '归档', body, work=work, crumbs=[], buckets=buckets, star_n=star_n,
+        '年月', body, work=work,
+        crumbs=[('首页', '/'), ('年月', '/by-date')],
+        buckets=buckets, star_n=star_n,
     )
 
 
@@ -2824,7 +2977,10 @@ def render_year(work: Path, year: str) -> bytes:
             f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
             f'<div class="ledger"><div class="ledger-empty">未找到该年份。</div></div>'
         )
-        return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
+        return page_shell(
+            year, body, work=work,
+            crumbs=[('首页', '/'), ('年月', '/by-date'), (year, f'/y/{year}')],
+        )
 
     months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
     filled_rows = []
@@ -2870,7 +3026,10 @@ def render_year(work: Path, year: str) -> bytes:
         f'</div>'
         f'<div class="ledger">{ledger_inner}</div>'
     )
-    return page_shell(year, body, work=work, crumbs=[('首页', '/'), (year, f'/y/{year}')])
+    return page_shell(
+        year, body, work=work,
+        crumbs=[('首页', '/'), ('年月', '/by-date'), (year, f'/y/{year}')],
+    )
 
 
 def theme_ledger_sub(theme: dict) -> str:
@@ -2949,6 +3108,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         work=work,
         crumbs=[
             ('首页', '/'),
+            ('年月', '/by-date'),
             (year, f'/y/{year}'),
             (display, f'/y/{year}/{urllib.parse.quote(month)}'),
         ],
@@ -2966,7 +3126,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
-        f'<p class="page-meta">截图从归档中分出，适合快速清理。</p>'
+        f'<p class="page-meta">截图单独分出，适合快速清理。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -3366,6 +3526,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/' or path == '/index.html':
                 body = render_home(self.work)
+                self._send(body, 'text/html')
+            elif path == '/by-date':
+                body = render_by_date_home(self.work)
                 self._send(body, 'text/html')
             elif path == '/screenshots':
                 body = render_screenshots(self.work, self.thumb_root)

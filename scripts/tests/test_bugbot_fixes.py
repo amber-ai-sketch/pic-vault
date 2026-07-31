@@ -105,6 +105,7 @@ def test_gallery_menu_counts_and_dismissal():
     check(
         'gallery shortcut nav replaces history between peers',
         'function shouldReplaceGalleryShortcutNav' in js
+        and "'/by-date': true" in js
         and 'galleryShortcutPaths[currentPath]' in js
         and 'window.location.replace(jumpLink.href)' in js,
     )
@@ -114,7 +115,64 @@ def test_gallery_menu_counts_and_dismissal():
         (work / 'by-date' / '2026' / '2026-08').mkdir(parents=True)
         (work / 'by-date' / '2025' / '2025-12_雪山' / 'videos').mkdir(parents=True)
         html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
+        check('gallery menu has by-date entry', 'href="/by-date">年月' in html)
         check('gallery menu theme count', '<span class="n"> 2</span>' in html and '>主题' in html)
+
+
+def test_home_overview_cards_and_by_date_route():
+    print('\n1c2. Home is folder overview; by-date keeps year ledger')
+    import inspect
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        photo = work / 'by-date' / '2026' / '2026-07' / 'photos'
+        video = work / 'by-date' / '2026' / '2026-07' / 'videos'
+        theme_photo = work / 'by-date' / '2026' / '2026-08_海南' / 'photos'
+        for d in (photo, video, theme_photo, work / 'screenrecords', work / 'docs', work / 'things', work / '_trash'):
+            d.mkdir(parents=True)
+        shots = work / 'screenshots'
+        shots.mkdir(parents=True)
+        (photo / '20260701_120000_iphone_a.jpg').write_bytes(b'x')
+        (video / '20260701_120000_iphone_b.mov').write_bytes(b'x')
+        (theme_photo / '20260801_120000_iphone_c.jpg').write_bytes(b'x')
+        for i in range(2):
+            (shots / f'screenshot_{i}.jpg').write_bytes(b'x')
+        (work / 'screenrecords' / 'screenrecorder_0.mov').write_bytes(b'x')
+        (work / 'docs' / 'doc_0.jpg').write_bytes(b'x')
+        (work / 'things' / 'things_0.jpg').write_bytes(b'x')
+        (work / '_trash' / 'batch').mkdir(parents=True)
+        (work / '_trash' / 'batch' / 'deleted.jpg').write_bytes(b'x')
+        (work / '_meta' / 'stars').mkdir(parents=True)
+        (work / '_meta' / 'stars' / 'screenshots.json').write_text(
+            json.dumps({str((shots / 'screenshot_0.jpg').relative_to(work)): True}),
+            encoding='utf-8',
+        )
+
+        wb.clear_web_caches()
+        home = wb.render_home(work).decode('utf-8')
+        check('home title is gallery overview', '<h2 class="page-title">图库</h2>' in home)
+        check('home has by-date card', '<span class="home-card-name">年月</span>' in home and 'href="/by-date"' in home)
+        check('home no longer links years directly', 'href="/y/2026"' not in home)
+        check('home screenshot count card', re.search(r'home-card-name">截图</span><span class="home-card-count">2 项</span>', home) is not None)
+        check('home screenrecord count card', re.search(r'home-card-name">录屏</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home docs count card', re.search(r'home-card-name">文档</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home things count card', re.search(r'home-card-name">物品</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home starred count card', re.search(r'home-card-name">加星</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home theme count card', re.search(r'home-card-name">主题</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home trash count is visible', re.search(r'home-card-name">回收站</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home trash is not a route link', 'href="/trash"' not in home)
+
+        by_date = wb.render_by_date_home(work).decode('utf-8')
+        check('by-date title is 年月', '<h2 class="page-title">年月</h2>' in by_date)
+        check('by-date keeps year ledger', 'href="/y/2026"' in by_date)
+
+        year = wb.render_year(work, '2026').decode('utf-8')
+        check('year breadcrumb includes 年月', 'href="/by-date">年月</a>' in year)
+        bucket = wb.render_bucket(work, '2026', '2026-07', work / '_meta' / 'thumbs').decode('utf-8')
+        check('bucket breadcrumb includes 年月', 'href="/by-date">年月</a>' in bucket)
+
+        src = inspect.getsource(wb.Handler.do_GET)
+        check('handler has by-date route', "path == '/by-date'" in src and 'render_by_date_home' in src)
 
 
 def test_picvault_web_port_state():
@@ -602,8 +660,8 @@ def test_ledger_star_live_counts():
         check('render_year keeps photos/videos', '照片 2｜视频 1' in year_html)
 
         home_html = wb.render_home(work).decode('utf-8')
-        check('render_home year totals include 加星', '加星 2' in home_html)
-        check('render_home year totals include Live', '实况 1' in home_html)
+        check('render_home by-date totals include 加星', '加星 2' in home_html)
+        check('render_home by-date totals include Live', '实况 1' in home_html)
 
 
 def test_events_api_edit():
@@ -1930,8 +1988,8 @@ def test_theme_remove_cli_without_yaml():
         check('theme remove preserves files', themes[0].get('files') == ['keep.jpg'])
 
 
-def test_home_empty_copy_says_normal_archive():
-    print('\n25d. Home empty copy distinguishes normal archive from screenshots')
+def test_by_date_empty_copy_says_normal_archive():
+    print('\n25d. By-date empty copy distinguishes normal archive from screenshots')
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
@@ -1940,10 +1998,10 @@ def test_home_empty_copy_says_normal_archive():
         for i in range(2):
             (work / 'screenshots' / f'screenshot_{i}.jpg').write_bytes(b'x')
         wb.clear_web_caches()
-        html = wb.render_home(work).decode('utf-8')
-        check('home empty copy says normal archive', '没有普通照片/视频归档' in html)
-        check('home empty copy omits pipeline hint', '把照片/视频放进收件箱后' not in html)
-        check('home empty copy keeps screenshot count separate', '截图<span class="n"> 2</span>' in html)
+        html = wb.render_by_date_home(work).decode('utf-8')
+        check('by-date empty copy says normal archive', '没有普通照片/视频归档' in html)
+        check('by-date empty copy omits pipeline hint', '把照片/视频放进收件箱后' not in html)
+        check('by-date empty copy keeps screenshot count separate', '截图<span class="n"> 2</span>' in html)
 
 
 def test_web_path_traversal_and_cors_hardening():
@@ -2201,7 +2259,7 @@ def test_perf_quick_wins_cache_and_thumb_headers():
             # render_home must not trigger a second scan via page_shell.
             html = wb.render_home(work).decode('utf-8')
             check('render_home scans once', scan_calls['n'] == 1, detail=str(scan_calls['n']))
-            check('home still has 归档', '归档' in html)
+            check('home is gallery overview', '图库' in html and 'href="/by-date"' in html)
             # Second home within TTL: topbar cache → no new scan_buckets.
             wb.render_home(work)
             check(
@@ -2447,6 +2505,7 @@ def main():
     test_dashboard_pipeline_button()
     test_dashboard_web_start_copy()
     test_gallery_menu_counts_and_dismissal()
+    test_home_overview_cards_and_by_date_route()
     test_picvault_web_port_state()
     test_picvault_web_restart_clears_orphan_same_work_server()
     test_console_link_shows_dashboard_url()
@@ -2478,7 +2537,7 @@ def main():
     test_theme_start_month_reassign_and_validate()
     test_theme_add_files_cli_and_list()
     test_theme_remove_cli_without_yaml()
-    test_home_empty_copy_says_normal_archive()
+    test_by_date_empty_copy_says_normal_archive()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()

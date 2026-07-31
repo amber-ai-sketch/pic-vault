@@ -365,6 +365,10 @@ Web 纠错复用同一套 `plan_destination` / `reclassify_paths`：
 ### Web 浏览
 
 ```
+GET  /                    # 图库首页：文件夹总览（年月、截图、录屏、文档、物品、主题、回收站计数）
+GET  /by-date             # 年月：按年份/月桶浏览普通照片和视频
+GET  /y/<year>            # 年月下的年份入口
+GET  /y/<year>/<month>    # 年月下的月桶 / 主题桶图库
 GET  /screenshots           # 截图库
 GET  /screenrecords         # 录屏库
 GET  /docs                  # 文档库
@@ -629,7 +633,8 @@ macOS Ventura+ Photos.app 左侧栏有 "Duplicates" 相簿。AppleScript 跑完�
 
 Flask 单进程，依赖仅 Pillow + Flask + ffmpeg，监听 `:8765`。
 
-- 路由：`/` `/y/<year>/<month>` `/screenshots` `/screenrecords` `/themes` `POST /api/star` `POST /api/reclassify` `/raw` `/thumb`
+- 路由：`/`（图库总览） `/by-date`（年月） `/y/<year>` `/y/<year>/<month>` `/screenshots` `/screenrecords` `/docs` `/things` `/starred` `/themes` `POST /api/star` `POST /api/reclassify` `/raw` `/thumb`
+- 回收站仅在首页显示 `_trash/` 计数；当前不提供 `/trash` 浏览或恢复页面
 - 排序默认 `capture`；缩略图懒加载
 - 画廊支持勾选 +「移至截图录屏 / 移回普通分类 / 移至文档 / 移至物品」
 - 仅监听 LAN；HEIC 缩略图走 macOS `sips`
