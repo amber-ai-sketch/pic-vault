@@ -512,18 +512,23 @@ def bucket_display_name(name: str) -> str:
 _CACHE_LOCK = threading.Lock()
 _TOPBAR_CACHE_TTL = 15.0
 _STATUS_COUNTS_TTL = 10.0
+_TRASH_COUNT_TTL = 10.0
 # work_key -> {'expires': float, 'sig': tuple, 'buckets': dict, 'star_n': int}
 _topbar_cache: dict = {}
 # work_key -> {'expires': float, 'sig': tuple, 'counts': dict}
 _status_counts_cache: dict = {}
+# work_key -> {'expires': float, 'sig': tuple, 'count': int}
+_trash_count_cache: dict = {}
 
 _TOPBAR_MTIME_ROOTS = (
     'by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta/stars',
+    '_meta/events.yaml',
 )
 _STATUS_MTIME_ROOTS = (
     'inbox', 'by-date', 'screenshots', 'screenrecords', 'docs', 'things',
     '_vlogs', '_trash', '_meta/stars',
 )
+_TRASH_MTIME_ROOTS = ('_trash',)
 
 
 def _dir_mtime_sig(work: Path, roots: tuple) -> tuple:
@@ -543,6 +548,20 @@ def clear_web_caches():
     with _CACHE_LOCK:
         _topbar_cache.clear()
         _status_counts_cache.clear()
+        _trash_count_cache.clear()
+
+
+def count_configured_themes(work: Path) -> int:
+    """Count valid themes from _meta/events.yaml for UI labels."""
+    path = work / '_meta' / 'events.yaml'
+    if not path.exists():
+        return 0
+    try:
+        themes = rename_mod.parse_events_yaml_text(path.read_text(encoding='utf-8'))
+        rename_mod.validate_events_themes(themes)
+    except Exception:
+        return 0
+    return len(themes)
 
 
 def scan_buckets(work: Path) -> dict:
@@ -553,7 +572,7 @@ def scan_buckets(work: Path) -> dict:
         'screenrecords_count': 0,
         'docs_count': 0,
         'things_count': 0,
-        'themes_count': 0,
+        'themes_count': count_configured_themes(work),
     }
 
     by_date = work / 'by-date'
@@ -570,8 +589,6 @@ def scan_buckets(work: Path) -> dict:
                 # Stars JSON is keyed by month bucket name (e.g. 2024-07_海南).
                 star_count = len(load_stars(work, month_dir.name))
                 is_themed = '_' in month_dir.name
-                if is_themed:
-                    result['themes_count'] += 1
                 theme_name = month_dir.name.split('_', 1)[1] if is_themed else ''
                 months.append({
                     'name': month_dir.name,
@@ -667,6 +684,25 @@ def get_status_counts(work: Path) -> dict:
             'counts': counts,
         }
     return dict(counts)
+
+
+def get_trash_count(work: Path) -> int:
+    """Cached count for the home trash card without walking every folder."""
+    key = str(work.resolve()) if work.exists() else str(work)
+    now = time.monotonic()
+    sig = _dir_mtime_sig(work, _TRASH_MTIME_ROOTS)
+    with _CACHE_LOCK:
+        hit = _trash_count_cache.get(key)
+        if hit and hit['expires'] > now and hit['sig'] == sig:
+            return int(hit['count'])
+    count = count_files_in(work / '_trash')
+    with _CACHE_LOCK:
+        _trash_count_cache[key] = {
+            'expires': now + _TRASH_COUNT_TTL,
+            'sig': sig,
+            'count': count,
+        }
+    return int(count)
 
 def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Path]:
     """List files in a specific month/theme bucket.
@@ -829,6 +865,7 @@ def save_stars(work: Path, bucket: str, stars: dict):
     path = resolve_stars_path(work, bucket)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({k: True for k in stars}, indent=2, ensure_ascii=False))
+    clear_web_caches()
 
 
 def migrate_star_path(work: Path, old_rel: str, new_rel: str):
@@ -921,6 +958,8 @@ def trash_paths(work: Path, paths: list) -> list:
         except Exception as e:
             item['error'] = str(e)
         results.append(item)
+    if any(item.get('ok') for item in results):
+        clear_web_caches()
     return results
 
 
@@ -2898,7 +2937,7 @@ def render_home(work: Path) -> bytes:
     star_n, buckets = get_topbar_stats(work)
     totals = _by_date_totals(buckets)
     by_date_n = totals['photos'] + totals['videos']
-    trash_n = count_files_in(work / '_trash')
+    trash_n = get_trash_count(work)
     by_date_meta = (
         f"{totals['years']} 年｜{totals['months']} 个月｜{totals['themes']} 主题｜"
         f"{format_ledger_stats(totals['photos'], totals['videos'], totals['stars'], totals['lives'])}"
@@ -3502,6 +3541,8 @@ class Handler(BaseHTTPRequestHandler):
                                 self.work, item['companion_src'], item['companion_dest'],
                             )
                 ok_n = sum(1 for r in results if r.get('ok'))
+                if ok_n:
+                    clear_web_caches()
                 self._send_json({
                     'ok': ok_n == len(results),
                     'results': results,
@@ -3771,6 +3812,7 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copy2(dest, bak)
             tmp.write_text(yaml_text, encoding='utf-8')
             os.replace(tmp, dest)
+            clear_web_caches()
         except Exception as e:
             try:
                 if tmp.exists():

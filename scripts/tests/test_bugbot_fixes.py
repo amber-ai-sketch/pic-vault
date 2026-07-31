@@ -111,9 +111,20 @@ def test_gallery_menu_counts_and_dismissal():
     )
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
-        (work / 'by-date' / '2026' / '2026-07_海南' / 'photos').mkdir(parents=True)
+        (work / 'by-date' / '2026' / '2026-07' / 'photos').mkdir(parents=True)
         (work / 'by-date' / '2026' / '2026-08').mkdir(parents=True)
-        (work / 'by-date' / '2025' / '2025-12_雪山' / 'videos').mkdir(parents=True)
+        (work / 'by-date' / '2025' / '2025-12' / 'videos').mkdir(parents=True)
+        (work / '_meta').mkdir(parents=True)
+        (work / '_meta' / 'events.yaml').write_text(
+            'themes:\n'
+            '  - name: 海南\n'
+            '    month: 2026-07\n'
+            '    sources: [iphone]\n'
+            '  - name: 雪山\n'
+            '    month: 2025-12\n'
+            '    sources: [canon]\n',
+            encoding='utf-8',
+        )
         html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
         check('gallery menu has by-date entry', 'href="/by-date">年月' in html)
         check('gallery menu theme count', '<span class="n"> 2</span>' in html and '>主题' in html)
@@ -143,6 +154,16 @@ def test_home_overview_cards_and_by_date_route():
         (work / '_trash' / 'batch').mkdir(parents=True)
         (work / '_trash' / 'batch' / 'deleted.jpg').write_bytes(b'x')
         (work / '_meta' / 'stars').mkdir(parents=True)
+        (work / '_meta' / 'events.yaml').write_text(
+            'themes:\n'
+            '  - name: 海南\n'
+            '    month: 2026-08\n'
+            '    sources: [iphone]\n'
+            '  - name: 雪山\n'
+            '    month: 2025-12\n'
+            '    sources: [canon]\n',
+            encoding='utf-8',
+        )
         (work / '_meta' / 'stars' / 'screenshots.json').write_text(
             json.dumps({str((shots / 'screenshot_0.jpg').relative_to(work)): True}),
             encoding='utf-8',
@@ -158,7 +179,7 @@ def test_home_overview_cards_and_by_date_route():
         check('home docs count card', re.search(r'home-card-name">文档</span><span class="home-card-count">1 项</span>', home) is not None)
         check('home things count card', re.search(r'home-card-name">物品</span><span class="home-card-count">1 项</span>', home) is not None)
         check('home starred count card', re.search(r'home-card-name">加星</span><span class="home-card-count">1 项</span>', home) is not None)
-        check('home theme count card', re.search(r'home-card-name">主题</span><span class="home-card-count">1 项</span>', home) is not None)
+        check('home theme count card', re.search(r'home-card-name">主题</span><span class="home-card-count">2 项</span>', home) is not None)
         check('home trash count is visible', re.search(r'home-card-name">回收站</span><span class="home-card-count">1 项</span>', home) is not None)
         check('home trash is not a route link', 'href="/trash"' not in home)
 
@@ -435,9 +456,13 @@ def test_star_api_and_lightbox_sync():
             check('star toggle on ok', r1.get('ok') is True and r1.get('starred') is True)
             stars = wb.load_stars(work, bucket)
             check('star persisted to JSON', rel in stars)
+            home_on = wb.render_home(work).decode('utf-8')
+            check('home star count updates on', 'home-card-name">加星</span><span class="home-card-count">1 项</span>' in home_on)
             r2 = post({'path': rel, 'bucket': bucket, 'action': 'toggle'})
             check('star toggle off ok', r2.get('ok') is True and r2.get('starred') is False)
             check('star removed from JSON', rel not in wb.load_stars(work, bucket))
+            home_off = wb.render_home(work).decode('utf-8')
+            check('home star count updates off', 'home-card-name">加星</span><span class="home-card-count">0 项</span>' in home_off)
             bad = post({'path': rel, 'bucket': '', 'action': 'toggle'})
             check('empty bucket rejected', bad.get('ok') is False)
         finally:
@@ -2274,6 +2299,36 @@ def test_perf_quick_wins_cache_and_thumb_headers():
         finally:
             wb.scan_buckets = old_scan
             wb.clear_web_caches()
+
+        # Home trash card must not rglob _trash on every refresh.
+        trash_calls = {'n': 0}
+        real_count_for_home = wb.count_files_in
+
+        def counting_trash_for_home(p):
+            if Path(p).name == '_trash':
+                trash_calls['n'] += 1
+            return real_count_for_home(p)
+
+        old_count_for_home = wb.count_files_in
+        try:
+            wb.count_files_in = counting_trash_for_home
+            wb.clear_web_caches()
+            wb.render_home(work)
+            wb.render_home(work)
+            check('home trash count cached', trash_calls['n'] == 1, detail=str(trash_calls['n']))
+        finally:
+            wb.count_files_in = old_count_for_home
+            wb.clear_web_caches()
+
+        # Mutating file operations must invalidate home/topbar counts immediately.
+        stale_target = photo / '20260701_120000_iphone_bbb222.jpg'
+        stale_target.write_bytes(jpeg)
+        wb.clear_web_caches()
+        before_home = wb.render_home(work).decode('utf-8')
+        wb.trash_paths(work, [str(stale_target.relative_to(work))])
+        after_home = wb.render_home(work).decode('utf-8')
+        check('home count before trash includes target', 'home-card-name">年月</span><span class="home-card-count">2 项</span>' in before_home)
+        check('home count invalidated after trash', 'home-card-name">年月</span><span class="home-card-count">1 项</span>' in after_home)
 
         # status counts: second call must not re-walk (spy count_files_in).
         count_calls = {'n': 0}
