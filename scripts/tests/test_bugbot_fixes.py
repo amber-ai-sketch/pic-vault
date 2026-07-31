@@ -420,6 +420,9 @@ def test_star_api_and_lightbox_sync():
     )
     check('lightbox space picks and advances', 'function pickCurrentAndAdvance' in js and "e.code === 'Space'" in js)
     check('lightbox pick syncs gallery cell', 'setPathPicked(path, true)' in js)
+    check('bulk star function exists', 'function starSelected' in js)
+    check('bulk star uses star API on action', "action: 'on'" in js)
+    check('bulk star button present', 'data-bulk-star="1"' in wb._gallery_toolbar(2, 0, context='screen'))
     check('lightbox has single delete', 'function trashLightboxCurrent' in js and 'class="lb-trash"' in js)
     check('lightbox delete posts one path', 'JSON.stringify({ paths: [path] })' in js)
     check('lightbox delete confirm uses escaped newlines', "删除当前文件？\\n' + (name || path) + '\\n\\n会移到 _trash/" in js)
@@ -477,6 +480,53 @@ def test_star_api_and_lightbox_sync():
             check('home star count updates off', 'home-card-name">加星</span><span class="home-card-count">0 项</span>' in home_off)
             bad = post({'path': rel, 'bucket': '', 'action': 'toggle'})
             check('empty bucket rejected', bad.get('ok') is False)
+        finally:
+            httpd.shutdown()
+
+
+def test_star_api_accepts_on_for_batch_ui():
+    print('\n6b. /api/star action=on supports batch UI')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        photo = work / 'screenshots'
+        photo.mkdir(parents=True)
+        files = [photo / 'a.jpg', photo / 'b.jpg']
+        for f in files:
+            f.write_bytes(b'jpg')
+
+        class H(wb.Handler):
+            pass
+
+        H.work = work
+        H.thumb_root = work / '_meta' / 'thumbs'
+        from http.server import ThreadingHTTPServer
+        import threading
+        import urllib.request
+
+        httpd = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        base = f'http://127.0.0.1:{port}'
+
+        try:
+            for f in files:
+                req = urllib.request.Request(
+                    base + '/api/star',
+                    data=json.dumps({
+                        'path': str(f.relative_to(work)),
+                        'bucket': 'screenshots',
+                        'action': 'on',
+                    }).encode(),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req) as r:
+                    data = json.loads(r.read())
+                check(f'action=on ok for {f.name}', data.get('ok') is True and data.get('starred') is True)
+            stars = wb.load_stars(work, 'screenshots')
+            check('batch-ui stars persisted both files', all(str(f.relative_to(work)) in stars for f in files))
         finally:
             httpd.shutdown()
 
@@ -2626,6 +2676,7 @@ def main():
     test_picvault_sync_uses_backup_env()
     test_picvault_sync_args_order_independent()
     test_star_api_and_lightbox_sync()
+    test_star_api_accepts_on_for_batch_ui()
     test_things_reclassify_and_ui()
     test_live_pair_mov_fail_rolls_back()
     test_reclassify_moves_live_companion()

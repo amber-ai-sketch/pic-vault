@@ -1306,7 +1306,8 @@ body.select-mode .toolbar-organize { display: flex; }
   color: var(--muted);
   margin-left: 4px;
 }
-.btn-reclass {
+.btn-reclass,
+.btn-bulk-star {
   font-family: var(--sans);
   font-weight: 500;
   font-size: var(--text-xs);
@@ -1318,8 +1319,10 @@ body.select-mode .toolbar-organize { display: flex; }
   cursor: pointer;
   transition: background .12s;
 }
-.btn-reclass:hover { background: var(--paper); }
-.btn-reclass:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-reclass:hover,
+.btn-bulk-star:hover { background: var(--paper); }
+.btn-reclass:disabled,
+.btn-bulk-star:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-trash {
   font-family: var(--sans);
   font-weight: 500;
@@ -1964,7 +1967,7 @@ body.select-mode .cell .fname {
   .star.pulse { animation: none; }
   .page-in { animation: none; }
   html { scroll-behavior: auto; }
-  .chip, .btn-reclass, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
+  .chip, .btn-reclass, .btn-bulk-star, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
 
 '''
@@ -2101,7 +2104,7 @@ PAGE_JS = '''
         document.body.classList.contains('select-mode') ? '已选 0 个，先勾选缩略图' : ''
       );
     }
-    document.querySelectorAll('.btn-reclass, .btn-trash').forEach(function (b) {
+    document.querySelectorAll('.btn-reclass, .btn-bulk-star, .btn-trash').forEach(function (b) {
       b.disabled = n === 0;
     });
   }
@@ -2177,6 +2180,62 @@ PAGE_JS = '''
     var cell = cellForPath(path || currentLightboxPath());
     var pick = cell ? cell.querySelector('.pick') : null;
     cb.checked = !!(pick && pick.checked);
+  }
+
+  async function starSelected() {
+    var cells = Array.prototype.slice.call(document.querySelectorAll('.cell.selected'));
+    if (!cells.length) {
+      toast('请先点「批量选择」，再勾选文件');
+      return;
+    }
+    var targets = cells.map(function (cell) {
+      var star = cell.querySelector('.star[data-path][data-bucket]');
+      return star ? {
+        path: star.getAttribute('data-path'),
+        bucket: star.getAttribute('data-bucket'),
+        already: star.classList.contains('on')
+      } : null;
+    }).filter(function (x) { return x && x.path && x.bucket; });
+    var toAdd = targets.filter(function (x) { return !x.already; });
+    if (!targets.length) {
+      toast('没有可加星的文件');
+      return;
+    }
+    if (!toAdd.length) {
+      toast('已选文件都已加星');
+      return;
+    }
+    try {
+      var added = 0;
+      for (var i = 0; i < toAdd.length; i++) {
+        var item = toAdd[i];
+        var r = await fetch('/api/star', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: item.path, bucket: item.bucket, action: 'on' })
+        });
+        var data = await r.json();
+        if (!data.ok) {
+          toast('加星失败：' + (data.error || item.path));
+          return;
+        }
+        if (data.starred) {
+          applyStarState(item.path, true);
+          added += 1;
+        }
+      }
+      var sheet = gallerySheet();
+      if (sheet && sheet.getAttribute('data-star-total') != null) {
+        var cur = parseInt(sheet.getAttribute('data-star-total') || '0', 10) || 0;
+        setStarTotal(cur + added);
+      } else {
+        syncStarCount();
+      }
+      applyFilter();
+      toast('已加星：' + added + ' 个');
+    } catch (err) {
+      toast('网络错误：' + err);
+    }
   }
 
   async function reclassify(action) {
@@ -2440,6 +2499,12 @@ PAGE_JS = '''
     if (re) {
       e.preventDefault();
       reclassify(re.getAttribute('data-reclassify'));
+      return;
+    }
+    var bulkStar = e.target.closest('[data-bulk-star]');
+    if (bulkStar) {
+      e.preventDefault();
+      starSelected();
       return;
     }
     var trashBtn = e.target.closest('[data-trash]');
@@ -2805,6 +2870,11 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
                      paginated: bool = False) -> str:
     """context: normal | theme | screen | docs | things — hide the button for the current bucket."""
     actions = []
+    if context != 'starred':
+        actions.append(
+            '<button type="button" class="btn-bulk-star" data-bulk-star="1" disabled>'
+            '加星</button>'
+        )
     if context == 'theme':
         actions.append(
             '<button type="button" class="btn-reclass" data-reclassify="to_default_month" disabled>'
