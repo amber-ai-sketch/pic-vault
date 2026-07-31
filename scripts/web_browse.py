@@ -269,6 +269,10 @@ def effective_run_timeout_sec():
 
 
 def validate_path(path_str: str, allowed_prefixes, kind: str) -> Path:
+    # Match rename_organize / picvault: allow temp WORK roots in tests.
+    if os.environ.get('DUPEGURU_TEST') == '1' or os.environ.get('PICVAULT_TEST') == '1':
+        return Path(path_str).expanduser().resolve()
+
     p = Path(path_str).expanduser().resolve()
     for prefix in allowed_prefixes:
         prefix_resolved = str(Path(prefix).resolve())

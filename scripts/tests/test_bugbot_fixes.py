@@ -231,9 +231,7 @@ def test_picvault_web_port_state():
 
 def test_picvault_web_restart_clears_orphan_same_work_server():
     print('\n1e. picvault web restart clears same-WORK orphan server')
-    allowed_tmp_root = Path('/Users/ym/Downloads/pic-test')
-    allowed_tmp_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=str(allowed_tmp_root)) as tmp:
+    with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
         meta = work / '_meta'
         (meta / 'logs').mkdir(parents=True)
@@ -251,6 +249,7 @@ def test_picvault_web_restart_clears_orphan_same_work_server():
         port = sock.getsockname()[1]
         sock.close()
 
+        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
         orphan = subprocess.Popen(
             [
                 sys.executable,
@@ -259,14 +258,10 @@ def test_picvault_web_restart_clears_orphan_same_work_server():
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
         )
-        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
         try:
             for _ in range(30):
-                probe = subprocess.run(
-                    [str(PICVAULT), 'web', 'status', '--port', str(port)],
-                    env=env, capture_output=True, text=True,
-                )
                 if orphan.poll() is None:
                     break
                 time.sleep(0.1)
