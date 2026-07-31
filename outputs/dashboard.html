@@ -57,10 +57,6 @@
   }
 
   .masthead {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px 28px;
-    align-items: end;
     padding-bottom: 18px;
     margin-bottom: 22px;
     border-bottom: 1px solid var(--line);
@@ -86,8 +82,9 @@
 
   .web-status {
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
     gap: 10px;
     font-size: var(--text-xs);
     color: var(--muted);
@@ -179,6 +176,30 @@
     font-size: var(--text-xs);
     color: var(--muted);
     word-break: break-all;
+  }
+  .service-command {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .service-command-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .service-command-title {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .service-command-note {
+    margin: 0 0 8px;
+    font-size: var(--text-xs);
+    color: var(--muted);
+    line-height: 1.45;
   }
 
   .path-line {
@@ -909,15 +930,6 @@
       <h1 class="brand">PicVault</h1>
       <p class="tagline">归档｜加星｜备份</p>
     </div>
-    <div class="web-status">
-      <div class="web-status-row">
-        <span class="dot stopped" id="webDot"></span>
-        <span id="webStatus">Web：检查中</span>
-      </div>
-      <div class="btn-row">
-        <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
-      </div>
-    </div>
   </header>
 
   <div class="layout-shell">
@@ -937,8 +949,19 @@
 
   <section class="library-section page-in panel" aria-label="图库计数">
     <div class="section-head">
-      <p class="section-label">图库</p>
-      <p class="section-title">当前库概览</p>
+      <div>
+        <p class="section-label">图库</p>
+        <p class="section-title">当前库概览</p>
+      </div>
+      <div class="web-status">
+        <div class="web-status-row">
+          <span class="dot stopped" id="webDot"></span>
+          <span id="webStatus">检查中</span>
+        </div>
+        <div class="btn-row">
+          <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
+        </div>
+      </div>
     </div>
     <div class="library-list" role="group" aria-label="各桶计数">
       <div class="metric">
@@ -984,7 +1007,7 @@
     </div>
     <p class="hint" id="libraryWorkHint" hidden style="margin:10px 0 0;font-size:0.78rem;color:var(--muted);font-family:var(--mono);word-break:break-all;"></p>
     <div class="alert warn panel" id="workMismatchCard">
-      <p>Web 还绑着旧 WORK；这里的计数不是当前这块盘。先停旧 Web，再用新 WORK 重启。</p>
+      <p>Web 服务正在读取另一块工作盘。这里的计数不属于当前路径，请复制下方命令重启服务。</p>
       <code class="cmd" id="webRebindCmd"></code>
       <div class="btn-row">
         <button type="button" onclick="copyText('webRebindCmd', this)">复制重启命令</button>
@@ -1040,6 +1063,14 @@
         <button type="button" class="ghost" id="pathsCancelBtn" onclick="cancelEditPaths()" style="display:none">取消</button>
       </div>
     </form>
+    <div class="service-command" aria-label="重启 Web 服务">
+      <div class="service-command-head">
+        <p class="service-command-title">重启 Web 服务</p>
+        <button type="button" class="ghost" id="webRestartCopyBtn" onclick="copyText('webRestartCmd', this)">复制命令</button>
+      </div>
+      <p class="service-command-note" id="webRestartNote">改完代码或切换工作盘后使用。</p>
+      <code class="cmd" id="webRestartCmd">保存路径后生成重启命令。</code>
+    </div>
   </section>
 
     </aside>
@@ -1409,6 +1440,7 @@ function buildCmds(p) {
     PICVAULT: picvault,
     CMDS: {
       start:           workEnv + picvault + ' web start',
+      restart:         workEnv + picvault + ' web restart',
       init:            workEnv + picvault + ' init',
       inboxPath:       p.work + '/inbox',
       dedupeDry:       p.projectRoot + '/scripts/dedupe.py --work ' + p.work + ' --dry-run',
@@ -1430,6 +1462,7 @@ function applyPaths(p) {
   CMDS = built.CMDS;
   hydrateCmds();
   refreshProjectRootDisplay();
+  updateWebRestartCommand();
 }
 
 function hydrateCmds() {
@@ -1502,6 +1535,23 @@ function updatePathsSummary() {
   document.getElementById('sumWork').textContent = paths.work;
   document.getElementById('sumBackup').textContent = paths.backup;
   document.body.classList.toggle('paths-ready', isConfigured(paths));
+  updateWebRestartCommand();
+}
+
+function updateWebRestartCommand() {
+  const cmd = document.getElementById('webRestartCmd');
+  const note = document.getElementById('webRestartNote');
+  const copyBtn = document.getElementById('webRestartCopyBtn');
+  if (!cmd) return;
+  if (!isConfigured(paths)) {
+    cmd.textContent = '保存路径后生成重启命令。';
+    if (note) note.textContent = '改完代码或切换工作盘后使用。';
+    if (copyBtn) copyBtn.disabled = true;
+    return;
+  }
+  cmd.textContent = CMDS.restart || '';
+  if (note) note.textContent = '改完代码或切换工作盘后使用。';
+  if (copyBtn) copyBtn.disabled = false;
 }
 
 function setMetricValue(id, value, empty) {
@@ -1824,7 +1874,7 @@ async function resumeOrShowLatestRun(opts) {
   // web_stop is OK on mismatch (ends the old-bound process). Other runs would
   // mutate the old disk via /api/run — block them.
   if (statusWorkMismatch && cmdName !== 'web_stop') {
-    alert('Web 仍绑定旧工作盘。请先按图库上方提示重启 Web，再运行流水线步骤（否则会改到旧盘）。');
+    alert('当前 Web 服务绑定的工作盘和页面配置不同。请先按图库概览里的提示重启服务，再运行流水线步骤。');
     const card = document.getElementById('workMismatchCard');
     if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     return;
@@ -1907,7 +1957,7 @@ function updateLibraryWorkHint(apiWork, mismatch) {
   // Only surface when Web WORK disagrees with Dashboard — otherwise path lives in 路径.
   if (mismatch && apiWork) {
     el.hidden = false;
-    el.textContent = 'Web 绑定（旧）：' + apiWork + '｜Dashboard WORK：' + paths.work;
+    el.textContent = 'Web 当前读取：' + apiWork + '｜页面配置：' + paths.work;
   } else {
     el.hidden = true;
     el.textContent = '';
@@ -1961,7 +2011,7 @@ function updateInitStatus(initialized) {
     el.classList.add('need');
     if (stepEl) stepEl.classList.add('need');
   } else if (initialized === 'mismatch') {
-    el.textContent = '状态：不可信：Web 仍绑旧 WORK，请先按图库上方提示重启 Web（勿把旧盘「已初始化」当成新盘）。';
+    el.textContent = '状态：路径不一致。请先按图库概览里的提示重启 Web 服务。';
     el.classList.add('need');
     if (stepEl) stepEl.classList.add('need');
   } else {
@@ -2232,8 +2282,8 @@ async function pollStatus() {
 
       document.getElementById('webDot').className = 'dot running';
       document.getElementById('webStatus').textContent = mismatch
-        ? 'Web：运行中（旧 WORK）'
-        : 'Web：运行中';
+        ? '路径不一致'
+        : '运行中';
       const openStep = document.getElementById('openWebBtnStep');
       if (openStep) openStep.style.display = 'inline-block';
       document.getElementById('webNotRunningCard').classList.remove('visible');
@@ -2257,7 +2307,7 @@ async function pollStatus() {
         }
         const progressEl = document.getElementById('pipelineProgress');
         if (progressEl) {
-          progressEl.textContent = '进度：状态来自旧 WORK，不可信：请先按图库上方提示重启 Web';
+          progressEl.textContent = '进度：Web 服务绑定的工作盘和页面配置不同，请先按图库概览里的提示重启服务';
         }
         syncAlertPriority();
         return;
@@ -2291,7 +2341,7 @@ async function pollStatus() {
     }
   } catch (e) {
     document.getElementById('webDot').className = 'dot stopped';
-    document.getElementById('webStatus').textContent = 'Web：未运行';
+    document.getElementById('webStatus').textContent = '未运行';
     const openStep = document.getElementById('openWebBtnStep');
     if (openStep) openStep.style.display = 'none';
     document.getElementById('webNotRunningCard').classList.add('visible');
