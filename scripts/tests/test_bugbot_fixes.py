@@ -2123,6 +2123,33 @@ def test_by_date_empty_copy_says_normal_archive():
         check('by-date empty copy keeps screenshot count separate', '截图</span><span class="n">2 项</span>' in html)
 
 
+def test_gallery_empty_states_only_link_home():
+    print('\n25e. Gallery empty states only keep back-to-gallery action')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        for name in ('by-date', 'screenshots', 'screenrecords', 'docs', 'things', '_meta'):
+            (work / name).mkdir(parents=True)
+        thumb_root = work / '_meta' / 'thumbs'
+        pages = {
+            'by-date': wb.render_by_date_home(work).decode('utf-8'),
+            'missing-year': wb.render_year(work, '2027').decode('utf-8'),
+            'screenshots': wb.render_screenshots(work, thumb_root).decode('utf-8'),
+            'screenrecords': wb.render_screenrecords(work, thumb_root).decode('utf-8'),
+            'docs': wb.render_docs(work, thumb_root).decode('utf-8'),
+            'things': wb.render_things(work, thumb_root).decode('utf-8'),
+            'starred': wb.render_starred(work, thumb_root).decode('utf-8'),
+        }
+        (work / 'by-date' / '2026').mkdir(parents=True)
+        pages['empty-year'] = wb.render_year(work, '2026').decode('utf-8')
+        for name, html in pages.items():
+            m = re.search(r'<div class="empty-actions">(.*?)</div>', html)
+            actions = m.group(1) if m else ''
+            check(f'{name} empty state has back-to-gallery', 'href="/">回到图库</a>' in actions)
+            check(f'{name} empty state has only one action', actions.count('<a') == 1, detail=actions)
+            check(f'{name} empty state has no secondary action', 'class="primary"' not in actions, detail=actions)
+
+
 def test_web_path_traversal_and_cors_hardening():
     """Star bucket /thumb /month fences + CORS + default host."""
     print('\n26. Web path traversal + CORS hardening')
@@ -2701,6 +2728,7 @@ def main():
     test_theme_add_files_cli_and_list()
     test_theme_remove_cli_without_yaml()
     test_by_date_empty_copy_says_normal_archive()
+    test_gallery_empty_states_only_link_home()
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()

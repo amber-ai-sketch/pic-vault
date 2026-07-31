@@ -2988,7 +2988,7 @@ def _gallery_sheet_html(
         return _empty_state(
             empty_message,
             empty_text or '这里不会自动生成内容；完成对应步骤或从图库手动移入后会出现。',
-            empty_actions or [('回到图库', '/', False), ('打开按日期', '/by-date', True)],
+            empty_actions or [('回到图库', '/', False)],
         )
     page = entries[:GALLERY_PAGE_SIZE]
     loaded = len(page)
@@ -3187,7 +3187,7 @@ def render_by_date_home(work: Path) -> bytes:
         ledger = _empty_state(
             '还没有按拍摄日期归档的照片或视频',
             '把素材放进 inbox 后，回到控制台执行“重命名并归档”；完成后会按拍摄时间出现在这里。',
-            [('回到图库', '/', False), ('打开控制台', dashboard_file_url(), True)],
+            [('回到图库', '/', False)],
         )
     else:
         ledger = f'<div class="ledger">{"".join(rows)}</div>'
@@ -3213,7 +3213,7 @@ def render_year(work: Path, year: str) -> bytes:
     if not by_date.exists():
         body = (
             f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
-            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到按日期", "/by-date", True)])}'
+            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到图库", "/", False)])}'
         )
         return page_shell(
             year, body, work=work,
@@ -3262,7 +3262,7 @@ def render_year(work: Path, year: str) -> bytes:
         ledger = _empty_state(
             '这个年份还没有文件',
             '月份目录存在，但还没有可浏览的照片或视频。整理归档后再回来查看。',
-            [('回到按日期', '/by-date', True)],
+            [('回到图库', '/', False)],
         )
     body = (
         f'<div class="page-head">'
@@ -3332,7 +3332,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         year=year, month=month,
         empty_message='这个入口还没有文件',
         empty_text='归档后，文件会按拍摄时间进入默认月桶；主题桶需要先配置主题，再执行主题同步。',
-        empty_actions=[('回到按日期', '/by-date', False), ('打开主题配置', '/themes', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     meta = year
     if is_themed:
@@ -3370,7 +3370,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='screenshots',
         empty_message='还没有截图',
         empty_text='截图会在整理归档时从 inbox 分出来。归档完成后，这里适合集中清理和快速复核。',
-        empty_actions=[('回到图库', '/', False), ('打开按日期', '/by-date', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
@@ -3396,7 +3396,7 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='screenrecords',
         empty_message='还没有录屏',
         empty_text='屏幕录制会在整理归档时进入这里。之后可以在预览里播放、勾选或移至回收站。',
-        empty_actions=[('回到图库', '/', False), ('打开截图', '/screenshots', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
@@ -3422,7 +3422,7 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='docs',
         empty_message='还没有文档照片',
         empty_text='证件、票据和纸面信息需要从任意图库批量选择后手动移入。移入后方便集中查看。',
-        empty_actions=[('回到图库', '/', False), ('去截图页选择', '/screenshots', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
@@ -3448,7 +3448,7 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='things',
         empty_message='还没有物品照片',
         empty_text='设备、包装和物件记录需要从任意图库批量选择后手动移入。适合保存型号、标签和外观。',
-        empty_actions=[('回到图库', '/', False), ('去截图页选择', '/screenshots', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
@@ -3475,7 +3475,7 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
         entries, work, thumb_root, stars, kind='starred',
         empty_message='还没有加星内容',
         empty_text='回到任意图库，点缩略图右上角的星标；预览时也可以用底部的加星按钮。',
-        empty_actions=[('回到图库', '/', False), ('去截图页加星', '/screenshots', True)],
+        empty_actions=[('回到图库', '/', False)],
     )
     body = (
         f'<div class="page-head">'
