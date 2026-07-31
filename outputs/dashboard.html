@@ -85,7 +85,7 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px 12px;
+    gap: 8px 10px;
     font-size: var(--text-xs);
     color: var(--muted);
     min-width: 0;
@@ -109,25 +109,36 @@
   body.web-live #openWebBtn { display: inline-flex; }
   .web-status .btn-row { margin-top: 0; justify-content: flex-start; }
   .web-status #openWebBtn {
-    padding: 0;
-    border: none;
+    padding: 3px 8px 4px;
+    border: 1px solid var(--line);
     background: transparent;
-    color: var(--muted);
+    color: var(--ink);
     font-size: var(--text-xs);
-    font-weight: 400;
+    font-weight: 500;
     line-height: 1.2;
   }
   .web-status #openWebBtn:hover:not(:disabled) {
-    background: transparent;
-    color: var(--ink);
-    text-decoration: underline;
-    text-underline-offset: 3px;
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+    text-decoration: none;
+  }
+  .web-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .web-entry:hover #openWebBtn:not(:disabled) {
+    border-color: var(--ink);
   }
   /* Offline: alert below owns the CTA; header keeps brand only */
   body:not(.web-live) .web-status { display: none; }
 
-  .library-section .section-head > div { width: 100%; }
-  .library-section .web-status { margin-top: 8px; }
+  .library-section .section-head { display: none; }
 
   .section { margin-top: 40px; }
   .library-section {
@@ -162,18 +173,17 @@
   .paths-summary {
     display: none;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
   .paths-summary.visible { display: flex; }
 
   .paths-compact {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 20px;
-    align-items: baseline;
+    display: grid;
+    gap: 8px;
   }
   .path-chip {
-    display: inline-flex;
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr);
     flex-wrap: wrap;
     gap: 6px 10px;
     align-items: baseline;
@@ -189,9 +199,10 @@
     font-family: var(--mono);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+    color: var(--ink);
   }
   .paths-root-hint {
-    margin: 0;
+    margin: 2px 0 0;
     font-family: var(--mono);
     font-size: var(--text-xs);
     color: var(--muted);
@@ -982,15 +993,15 @@
     <div class="section-head">
       <div>
         <p class="section-label">图库</p>
-        <div class="web-status">
-          <div class="web-status-row">
-            <span class="dot stopped" id="webDot"></span>
-            <span id="webStatus">检查中</span>
-          </div>
-          <div class="btn-row">
-            <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
-          </div>
-        </div>
+      </div>
+    </div>
+    <div class="web-status web-entry">
+      <div class="web-status-row">
+        <span class="dot stopped" id="webDot"></span>
+        <span id="webStatus">检查中</span>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="openWebBtn" class="primary" onclick="openWeb()">打开图库</button>
       </div>
     </div>
     <div class="library-list" role="group" aria-label="各桶计数">
@@ -1126,7 +1137,7 @@
         <div class="step-header">
           <span class="step-num">00</span>
           <span class="step-title">初始化工作盘</span>
-      <button type="button" class="step-info" aria-label="创建 by-date、_meta、thumbs 等目录骨架。重复执行也安全。">
+          <button type="button" class="step-info" aria-label="创建 by-date、_meta、thumbs 等目录骨架；重复执行也安全">
             i
             <span class="step-tip" role="tooltip">
               <span>创建 by-date、_meta、thumbs 等目录骨架</span>
@@ -1136,7 +1147,7 @@
           </button>
         </div>
         <p class="step-callout">先建目录骨架</p>
-        <p class="step-desc">只建 by-date、_meta、thumbs 等目录，不会动 inbox 里的文件。第一次使用先跑 00。</p>
+        <p class="step-desc">只建 by-date、_meta、thumbs 等目录，不会动 inbox 里的文件；第一次使用先跑 00。</p>
         <p class="step-status" id="initStatusLine">状态：检测中…</p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -1154,7 +1165,7 @@
         <div class="step-header">
           <span class="step-num">01</span>
           <span class="step-title">导入到 inbox</span>
-          <button type="button" class="step-info" aria-label="把照片和视频先拖进 inbox，可带子文件夹。这一步不用跑命令。">
+          <button type="button" class="step-info" aria-label="把照片和视频先拖进 inbox，可带子文件夹；这一步不用跑命令">
             i
             <span class="step-tip" role="tooltip">
               <span>把照片和视频先拖进 inbox</span>
@@ -1171,7 +1182,7 @@
         <div class="step-header">
           <span class="step-num">02</span>
           <span class="step-title">去重</span>
-          <button type="button" class="step-info" aria-label="按文件内容找完全重复的文件；保留体积最大的一份，其余移到 _trash/，可找回。">
+          <button type="button" class="step-info" aria-label="按文件内容找完全重复的文件；保留体积最大的一份，其余移到 _trash/，可找回">
             i
             <span class="step-tip" role="tooltip">
               <span>按文件内容找完全重复的文件</span>
@@ -1200,7 +1211,7 @@
         <div class="step-header">
           <span class="step-num">03</span>
           <span class="step-title">重命名并归档</span>
-          <button type="button" class="step-info" aria-label="按拍摄时间重命名；照片和视频进 by-date/；截图进 screenshots/，录屏进 screenrecords/；文件会从 inbox 搬走，不是复制。">
+          <button type="button" class="step-info" aria-label="按拍摄时间重命名；照片和视频进 by-date/；截图进 screenshots/，录屏进 screenrecords/；文件会从 inbox 搬走，不是复制">
             i
             <span class="step-tip" role="tooltip">
               <span>按拍摄时间重命名</span>
@@ -1211,7 +1222,7 @@
           </button>
         </div>
         <p class="step-callout">按拍摄时间整理</p>
-        <p class="step-desc">按拍摄时间重命名。照片、视频进 <code>by-date/</code>，截图进 <code>screenshots/</code>，录屏进 <code>screenrecords/</code>；文件会从 <code>inbox/</code> 搬走。</p>
+        <p class="step-desc">按拍摄时间重命名；照片、视频进 <code>by-date/</code>，截图进 <code>screenshots/</code>，录屏进 <code>screenrecords/</code>；文件会从 <code>inbox/</code> 搬走。</p>
         <p class="step-status" id="renameStepStatus"></p>
         <details class="cmd-fold">
           <summary>查看命令</summary>
@@ -1230,7 +1241,7 @@
         <div class="step-header">
           <span class="step-num">04</span>
           <span class="step-title">浏览加星</span>
-          <button type="button" class="step-info has-warn" aria-label="先打开 Web 看归档结果，加星和纠错后再同步。">
+          <button type="button" class="step-info has-warn" aria-label="先打开 Web 看归档结果，加星和纠错后再同步">
             i
             <span class="step-tip" role="tooltip">
               <span>先打开 Web 看归档结果</span>
@@ -1252,7 +1263,7 @@
         <div class="step-header">
           <span class="step-num">05</span>
           <span class="step-title">同步到备份盘</span>
-          <button type="button" class="step-info" aria-label="把工作盘镜像到备份盘；默认只增不删；可重复执行。">
+          <button type="button" class="step-info" aria-label="把工作盘镜像到备份盘；默认只增不删；可重复执行">
             i
             <span class="step-tip" role="tooltip">
               <span>把工作盘镜像到备份盘</span>
@@ -1281,7 +1292,7 @@
         <div class="step-header">
           <span class="step-num">06</span>
           <span class="step-title">一键全流程</span>
-          <button type="button" class="step-info has-warn" aria-label="一次跑完去重、归档、同步；不熟先分步跑 02、03、05。">
+          <button type="button" class="step-info has-warn" aria-label="一次跑完去重、归档、同步；不熟先分步跑 02、03、05">
             i
             <span class="step-tip" role="tooltip">
               <span>一次跑完去重 → 归档 → 同步</span>
@@ -1580,10 +1591,14 @@ function updatePathsSummary() {
   const root = paths.projectRoot;
   const sumRoot = document.getElementById('sumProjectRoot');
   const rootSuffix = detectProjectRoot() ? '（自动）' : '';
-  sumRoot.textContent = 'PROJECT_ROOT：' + compactProjectRootPath(root) + rootSuffix;
+  sumRoot.textContent = 'PROJECT_ROOT ' + compactProjectRootPath(root) + rootSuffix;
   sumRoot.title = root;
-  document.getElementById('sumWork').textContent = paths.work;
-  document.getElementById('sumBackup').textContent = paths.backup;
+  const sumWork = document.getElementById('sumWork');
+  const sumBackup = document.getElementById('sumBackup');
+  sumWork.textContent = compactProjectRootPath(paths.work);
+  sumWork.title = paths.work;
+  sumBackup.textContent = compactProjectRootPath(paths.backup);
+  sumBackup.title = paths.backup;
   document.body.classList.toggle('paths-ready', isConfigured(paths));
   updateWebRestartCommand();
 }

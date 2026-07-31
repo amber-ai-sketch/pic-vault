@@ -126,8 +126,14 @@ def test_gallery_menu_counts_and_dismissal():
             encoding='utf-8',
         )
         html = wb.page_shell('首页', '<p>x</p>', work=work).decode('utf-8')
-        check('gallery menu has by-date entry', 'href="/by-date">年月' in html)
-        check('gallery menu theme count', '<span class="n"> 2</span>' in html and '>主题' in html)
+        check(
+            'gallery menu has by-date entry',
+            'href="/by-date"><span class="jump-name">年月</span>' in html,
+        )
+        check(
+            'gallery menu theme count',
+            'href="/themes"><span class="jump-name">主题</span><span class="n">2 项</span></a>' in html,
+        )
 
 
 def test_home_overview_cards_and_by_date_route():
@@ -2021,9 +2027,9 @@ def test_by_date_empty_copy_says_normal_archive():
             (work / 'screenshots' / f'screenshot_{i}.jpg').write_bytes(b'x')
         wb.clear_web_caches()
         html = wb.render_by_date_home(work).decode('utf-8')
-        check('by-date empty copy says normal archive', '没有普通照片/视频归档' in html)
-        check('by-date empty copy omits pipeline hint', '把照片/视频放进收件箱后' not in html)
-        check('by-date empty copy keeps screenshot count separate', '截图<span class="n"> 2</span>' in html)
+        check('by-date empty copy says year/month archive', '还没有按年月归档的照片或视频' in html)
+        check('by-date empty copy keeps current hint', '把素材放进 inbox' in html)
+        check('by-date empty copy keeps screenshot count separate', '截图</span><span class="n">2 项</span>' in html)
 
 
 def test_web_path_traversal_and_cors_hardening():

@@ -1098,8 +1098,8 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   right: 0;
   top: calc(100% + 8px);
   z-index: 30;
-  min-width: 10.5rem;
-  padding: 8px 0;
+  min-width: 13rem;
+  padding: 10px 0;
   background: var(--paper);
   border: 1px solid var(--line);
   box-shadow: 0 8px 24px rgba(0,0,0,0.06);
@@ -1111,11 +1111,12 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 14px;
+  padding: 9px 14px;
   color: var(--muted);
   text-decoration: none;
   white-space: nowrap;
 }
+.jumps-more-panel .jump-name { color: var(--ink); font-weight: 500; }
 .jumps-more-panel .n { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted); }
 .jumps-more-panel a:hover {
   background: var(--mist);
@@ -1267,11 +1268,11 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .toolbar-organize {
   display: none;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
   width: 100%;
-  padding-top: 8px;
-  margin-top: 4px;
+  padding-top: 10px;
+  margin-top: 6px;
   border-top: 1px solid var(--line);
 }
 body.select-mode .toolbar-organize { display: flex; }
@@ -1347,6 +1348,19 @@ body.select-mode .toolbar-organize { display: flex; }
   letter-spacing: 0.02em;
 }
 .toolbar .filter-tip::before { content: '说明：'; }
+.toolbar .review-tip {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  width: 100%;
+  margin: 2px 0 0;
+}
+.toolbar .review-tip kbd {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--mist);
+  padding: 1px 5px;
+}
 .gallery-more {
   display: flex;
   flex-direction: column;
@@ -1491,6 +1505,57 @@ body.select-mode .toolbar-organize { display: flex; }
   text-align: left;
   max-width: 28em;
 }
+.empty-card {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 30px 4px 34px;
+  max-width: 42rem;
+}
+.empty-kicker {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.empty-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.empty-text {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.7;
+}
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.empty-actions a,
+.empty-actions button {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+.empty-actions a.primary {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.empty-actions a:hover,
+.empty-actions button:hover { border-color: var(--ink); text-decoration: none; }
 
 .sheet {
   display: grid;
@@ -1612,7 +1677,7 @@ body.select-mode .cell .fname {
   height: 28px;
   border: none;
   border-radius: 0;
-  background: rgba(20,20,20,0.18);
+  background: rgba(20,20,20,0.28);
   color: rgba(255,255,255,0.88);
   text-shadow: 0 1px 2px rgba(0,0,0,0.35);
   cursor: pointer;
@@ -1623,7 +1688,7 @@ body.select-mode .cell .fname {
   padding: 0;
   transition: color .12s, background .12s, opacity .12s, transform .12s;
   z-index: 2;
-  opacity: 0.55;
+  opacity: 0.76;
 }
 .cell:hover .star,
 .star.on,
@@ -1672,25 +1737,25 @@ body.select-mode .cell .fname {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto auto auto;
+  gap: 10px 14px;
   align-items: center;
   background: rgba(255,255,255,0.92);
   border: none;
-  padding: 10px 14px;
-  font-family: var(--mono);
+  padding: 12px 14px;
+  font-family: var(--sans);
   font-size: var(--text-xs);
   color: var(--ink);
-  max-width: 90vw;
-  flex-wrap: wrap;
-  justify-content: center;
+  width: min(980px, calc(100vw - 40px));
 }
+.lb-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .lb-bar .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 42vw;
   min-width: 0;
+  color: var(--ink);
 }
 .lb-bar .pos {
   font-family: var(--mono);
@@ -1698,6 +1763,21 @@ body.select-mode .cell .fname {
   color: var(--muted);
   flex-shrink: 0;
   letter-spacing: 0.02em;
+}
+.lb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.lb-group:first-of-type { border-left: none; padding-left: 0; }
+.lb-group-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 .lb-pick-wrap {
   display: inline-flex;
@@ -1732,6 +1812,10 @@ body.select-mode .cell .fname {
 .lb-bar .star-lb.on { background: var(--ink); color: #fff; }
 .lb-bar .lb-trash { color: #8f1d1d; }
 .lb-bar .lb-trash.busy { opacity: 0.55; pointer-events: none; }
+@media (max-width: 900px) {
+  .lb-bar { grid-template-columns: 1fr; align-items: stretch; }
+  .lb-group { border-left: none; padding-left: 0; flex-wrap: wrap; }
+}
 
 .toast {
   position: fixed;
@@ -2465,13 +2549,15 @@ PAGE_JS = '''
       lb = document.createElement('div');
       lb.className = 'lb';
       lb.innerHTML = '<div class="lb-media"></div><div class="lb-bar">' +
-        '<span class="pos"></span>' +
-        '<span class="nm"></span>' +
+        '<div class="lb-meta"><span class="pos"></span><span class="nm"></span></div>' +
+        '<div class="lb-group"><span class="lb-group-label">复核</span>' +
         '<label class="lb-pick-wrap"><input type="checkbox" class="lb-pick">勾选</label>' +
-        '<button type="button" class="star star-lb" title="加星">☆</button>' +
-        '<a class="open-raw" href="#" target="_blank" rel="noopener">原图</a>' +
-        '<button type="button" class="lb-trash">删除</button>' +
-        '<button type="button" id="lbClose">关闭</button></div>';
+        '<button type="button" class="star star-lb" title="加入加星">☆ 加星</button></div>' +
+        '<div class="lb-group"><span class="lb-group-label">文件</span>' +
+        '<a class="open-raw" href="#" target="_blank" rel="noopener">查看原图</a></div>' +
+        '<div class="lb-group"><span class="lb-group-label">危险</span>' +
+        '<button type="button" class="lb-trash">移至回收站</button>' +
+        '<button type="button" id="lbClose">关闭</button></div></div>';
       document.body.appendChild(lb);
     }
     lb.setAttribute('data-current-path', path);
@@ -2575,8 +2661,8 @@ def page_shell(title: str, body: str, work: Path = None, crumbs: list = None,
         if n is None:
             return f'<a href="{_esc(href)}">{_esc(label)}</a>'
         return (
-            f'<a href="{_esc(href)}">{_esc(label)}'
-            f'<span class="n"> {n}</span></a>'
+            f'<a href="{_esc(href)}"><span class="jump-name">{_esc(label)}</span>'
+            f'<span class="n">{int(n)} 项</span></a>'
         )
 
     more_links = [
@@ -2767,6 +2853,11 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
             '<button type="button" class="chip" data-filter="starred">'
             f'仅加星<span class="n" id="starCount">{star_count}</span></button>'
         )
+    review_tip = (
+        '<p class="review-tip">打开预览后按 <kbd>空格</kbd> 勾选当前并进入下一张；'
+        '加星、原图和删除仍可单独操作。</p>'
+        if file_count else ''
+    )
     return (
         f'<div class="toolbar">'
         f'<span class="count">文件 {file_count}｜'
@@ -2782,7 +2873,28 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         f'<span class="sel-count" id="selCount"></span>'
         f'{"".join(actions)}'
         f'</div>'
+        f'{review_tip}'
         f'</div>'
+    )
+
+
+def _empty_state(title: str, text: str, actions: list[tuple[str, str, bool]] = None,
+                 kicker: str = '当前为空') -> str:
+    actions = actions or []
+    action_html = ''
+    if actions:
+        links = []
+        for label, href, primary in actions:
+            cls = ' class="primary"' if primary else ''
+            links.append(f'<a{cls} href="{_esc(href)}">{_esc(label)}</a>')
+        action_html = f'<div class="empty-actions">{"".join(links)}</div>'
+    return (
+        '<div class="empty-card">'
+        f'<p class="empty-kicker">{_esc(kicker)}</p>'
+        f'<h3 class="empty-title">{_esc(title)}</h3>'
+        f'<p class="empty-text">{_esc(text)}</p>'
+        f'{action_html}'
+        '</div>'
     )
 
 
@@ -2806,13 +2918,16 @@ def _gallery_sheet_html(
     year: str = None,
     month: str = None,
     empty_message: str = '这个桶里还没有文件。',
+    empty_text: str = None,
+    empty_actions: list[tuple[str, str, bool]] = None,
 ) -> str:
     """First page of a gallery sheet + optional「加载更多」footer."""
     total = len(entries)
     if total == 0:
-        return (
-            f'<div class="ledger"><div class="ledger-empty">{_esc(empty_message)}'
-            f'</div></div>'
+        return _empty_state(
+            empty_message,
+            empty_text or '这里不会自动生成内容；完成对应步骤或从图库手动移入后会出现。',
+            empty_actions or [('回到图库', '/', False), ('打开年月', '/by-date', True)],
         )
     page = entries[:GALLERY_PAGE_SIZE]
     loaded = len(page)
@@ -2942,21 +3057,22 @@ def render_home(work: Path) -> bytes:
         f"{totals['years']} 年｜{totals['months']} 个月｜{totals['themes']} 主题｜"
         f"{format_ledger_stats(totals['photos'], totals['videos'], totals['stars'], totals['lives'])}"
     )
+    has_main_gallery = by_date_n > 0
     cards = [
-        _home_card('年月', by_date_n, '按年份和月份浏览普通照片/视频。', '/by-date', by_date_meta, primary=True),
-        _home_card('加星', star_n, '所有已收藏的照片和视频。', '/starred'),
-        _home_card('截图', buckets.get('screenshots_count') or 0, '截图集中清理和复核。', '/screenshots'),
-        _home_card('录屏', buckets.get('screenrecords_count') or 0, '屏幕录制视频集中回看。', '/screenrecords'),
-        _home_card('文档', buckets.get('docs_count') or 0, '证件、票据和纸面信息。', '/docs'),
-        _home_card('物品', buckets.get('things_count') or 0, '设备、包装和物件记录。', '/things'),
-        _home_card('主题', buckets.get('themes_count') or 0, '旅行和事件的主题桶配置。', '/themes'),
+        _home_card('年月', by_date_n, '按年份和月份浏览普通照片和视频', '/by-date', by_date_meta, primary=has_main_gallery),
+        _home_card('加星', star_n, '所有已加星的照片和视频', '/starred'),
+        _home_card('截图', buckets.get('screenshots_count') or 0, '截图集中清理和复核', '/screenshots'),
+        _home_card('录屏', buckets.get('screenrecords_count') or 0, '屏幕录制视频集中回看', '/screenrecords'),
+        _home_card('文档', buckets.get('docs_count') or 0, '证件、票据和纸面信息', '/docs'),
+        _home_card('物品', buckets.get('things_count') or 0, '设备、包装和物件记录', '/things'),
+        _home_card('主题', buckets.get('themes_count') or 0, '旅行和事件的主题桶配置', '/themes'),
         _home_card('回收站', trash_n, '软删除暂存，不参与备份。'),
     ]
     body = (
         '<div class="page-head">'
         '<div>'
         '<h2 class="page-title">图库</h2>'
-        '<p class="page-lede">选择一个文件夹继续浏览或整理。</p>'
+        '<p class="page-lede">选择一个入口继续浏览、加星或整理。</p>'
         '</div>'
         '</div>'
         f'<section class="home-grid" aria-label="图库文件夹">{"".join(cards)}</section>'
@@ -2999,10 +3115,10 @@ def render_by_date_home(work: Path) -> bytes:
             f'</a>'
         )
     if not rows:
-        ledger = (
-            '<div class="ledger"><div class="ledger-empty">'
-            '没有普通照片/视频归档'
-            '</div></div>'
+        ledger = _empty_state(
+            '还没有按年月归档的照片或视频',
+            '把素材放进 inbox 后，回到控制台执行“重命名并归档”；完成后会按拍摄时间出现在这里。',
+            [('回到图库', '/', False), ('打开控制台', dashboard_file_url(), True)],
         )
     else:
         ledger = f'<div class="ledger">{"".join(rows)}</div>'
@@ -3028,7 +3144,7 @@ def render_year(work: Path, year: str) -> bytes:
     if not by_date.exists():
         body = (
             f'<div class="page-head"><h2 class="page-title">{_esc(year)}</h2></div>'
-            f'<div class="ledger"><div class="ledger-empty">未找到该年份。</div></div>'
+            f'{_empty_state("未找到该年份", "这个年份目录不存在，可能还没有归档，或目录已经被移动。", [("回到年月", "/by-date", True)])}'
         )
         return page_shell(
             year, body, work=work,
@@ -3071,13 +3187,20 @@ def render_year(work: Path, year: str) -> bytes:
             filled_rows.append(row)
 
     rows = filled_rows + empty_rows
-    ledger_inner = ''.join(rows) if rows else '<div class="ledger-empty">空年份</div>'
+    if rows:
+        ledger = f'<div class="ledger">{"".join(rows)}</div>'
+    else:
+        ledger = _empty_state(
+            '这个年份还没有文件',
+            '月份目录存在，但还没有可浏览的照片或视频。整理归档后再回来查看。',
+            [('回到年月', '/by-date', True)],
+        )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">{_esc(year)}</h2>'
         f'<p class="page-meta">{len(months)} 个入口</p>'
         f'</div>'
-        f'<div class="ledger">{ledger_inner}</div>'
+        f'{ledger}'
     )
     return page_shell(
         year, body, work=work,
@@ -3138,7 +3261,9 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='bucket',
         year=year, month=month,
-        empty_message='这个桶里还没有文件。',
+        empty_message='这个入口还没有文件',
+        empty_text='归档后，文件会按拍摄时间进入默认月桶；主题桶需要先配置主题，再执行主题同步。',
+        empty_actions=[('回到年月', '/by-date', False), ('打开主题配置', '/themes', True)],
     )
     meta = year
     if is_themed:
@@ -3174,12 +3299,14 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='screenshots',
-        empty_message='没有截图。',
+        empty_message='还没有截图',
+        empty_text='截图会在整理归档时从 inbox 分出来。归档完成后，这里适合集中清理和快速复核。',
+        empty_actions=[('回到图库', '/', False), ('打开年月', '/by-date', True)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">截图</h2>'
-        f'<p class="page-meta">截图单独分出，适合快速清理。</p>'
+        f'<p class="page-meta">截图单独分出，适合快速清理和复核。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -3198,12 +3325,14 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='screenrecords',
-        empty_message='没有录屏。',
+        empty_message='还没有录屏',
+        empty_text='屏幕录制会在整理归档时进入这里。之后可以在预览里播放、勾选或移至回收站。',
+        empty_actions=[('回到图库', '/', False), ('打开截图', '/screenshots', True)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">录屏</h2>'
-        f'<p class="page-meta">录屏集中在这里，方便回看和删除。</p>'
+        f'<p class="page-meta">录屏集中在这里，方便回看和清理。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated)}'
         f'{sheet}'
@@ -3222,12 +3351,14 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='docs',
-        empty_message='没有文档照片。',
+        empty_message='还没有文档照片',
+        empty_text='证件、票据和纸面信息需要从任意图库批量选择后手动移入。移入后方便集中查看。',
+        empty_actions=[('回到图库', '/', False), ('去截图页选择', '/screenshots', True)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">文档</h2>'
-        f'<p class="page-meta">证件、票据和纸面信息，需要从图库手动移入。</p>'
+        f'<p class="page-meta">证件、票据和纸面信息，从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated)}'
         f'{sheet}'
@@ -3246,12 +3377,14 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='things',
-        empty_message='没有物品照片。',
+        empty_message='还没有物品照片',
+        empty_text='设备、包装和物件记录需要从任意图库批量选择后手动移入。适合保存型号、标签和外观。',
+        empty_actions=[('回到图库', '/', False), ('去截图页选择', '/screenshots', True)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">物品</h2>'
-        f'<p class="page-meta">设备、包装和物件记录，需要从图库手动移入。</p>'
+        f'<p class="page-meta">设备、包装和物件记录，从图库手动移入。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated)}'
         f'{sheet}'
@@ -3271,12 +3404,14 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
     paginated = len(entries) > GALLERY_PAGE_SIZE
     sheet = _gallery_sheet_html(
         entries, work, thumb_root, stars, kind='starred',
-        empty_message='还没有加星。回到任意图库，点缩略图右上角的星标。',
+        empty_message='还没有加星内容',
+        empty_text='回到任意图库，点缩略图右上角的星标；预览时也可以用底部的加星按钮。',
+        empty_actions=[('回到图库', '/', False), ('去截图页加星', '/screenshots', True)],
     )
     body = (
         f'<div class="page-head">'
         f'<h2 class="page-title">加星</h2>'
-        f'<p class="page-meta">已加星 {len(entries)} 个；这里汇总所有桶里的精选。</p>'
+        f'<p class="page-meta">已加星 {len(entries)} 个，汇总所有桶里的精选。</p>'
         f'</div>'
         f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated)}'
         f'{sheet}'
@@ -4434,10 +4569,11 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if parse_err:
-            ledger = (
-                '<div class="ledger"><div class="ledger-empty">'
-                '配置无法解析，请展开下方编辑配置修正。'
-                '</div></div>'
+            ledger = _empty_state(
+                '主题配置无法解析',
+                '展开下方编辑配置，按提示修正 YAML 后再保存。保存只写配置，不会搬文件。',
+                [],
+                kicker='配置有误',
             )
             hint = (
                 f'<p class="events-hint err">配置有误：{_esc(parse_err)}</p>'
@@ -4445,10 +4581,10 @@ class Handler(BaseHTTPRequestHandler):
             fold_note = ''
             fold_open = ' open'
         elif not rows:
-            ledger = (
-                '<div class="ledger"><div class="ledger-empty">'
-                '还没有主题。展开下方编辑配置，按示例添加。'
-                '</div></div>'
+            ledger = _empty_state(
+                '还没有主题',
+                '展开下方编辑配置，按示例添加旅行或事件。保存只写配置；真正搬文件前，先复制试跑命令看清计划。',
+                [],
             )
             hint = ''
             fold_note = (
