@@ -977,7 +977,7 @@
       </div>
       <div class="metric wide">
         <span class="k">上次同步</span>
-        <span class="v is-empty" id="lastSync"></span>
+        <span class="v" id="lastSync">未同步</span>
       </div>
     </div>
     <p class="hint" id="libraryWorkHint" hidden style="margin:10px 0 0;font-size:0.78rem;color:var(--muted);font-family:var(--mono);word-break:break-all;"></p>
@@ -1894,10 +1894,11 @@ function normalizeWorkPath(p) {
 }
 
 function clearLibraryMetrics() {
-  ['inbox', 'byDate', 'screenshots', 'screenrecords', 'docs', 'things', 'vlogs', 'trash', 'starred', 'lastSync']
+  ['inbox', 'byDate', 'screenshots', 'screenrecords', 'docs', 'things', 'vlogs', 'trash', 'starred']
     .forEach(function (id) {
       setMetricValue(id, '', true);
     });
+  setMetricValue('lastSync', '未同步', false);
 }
 
 function updateLibraryWorkHint(apiWork, mismatch) {

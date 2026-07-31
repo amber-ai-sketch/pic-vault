@@ -471,22 +471,22 @@ def test_ledger_star_live_counts():
         stats = wb.format_ledger_stats(2, 1, 2, 1)
         check(
             'format_ledger_stats includes 加星 + Live',
-            stats == '2 张 · 1 视频 · 2 加星 · 1 Live',
+            stats == '照片 2｜视频 1｜加星 2｜实况 1',
             detail=stats,
         )
         check(
             'format_ledger_stats omits zero star/Live',
-            wb.format_ledger_stats(3, 0, 0, 0) == '3 张 · 0 视频',
+            wb.format_ledger_stats(3, 0, 0, 0) == '照片 3｜视频 0',
         )
 
         year_html = wb.render_year(work, '2026').decode('utf-8')
-        check('render_year shows 加星', '2 加星' in year_html)
-        check('render_year shows Live', '1 Live' in year_html)
-        check('render_year keeps photos/videos', '2 张 · 1 视频' in year_html)
+        check('render_year shows 加星', '加星 2' in year_html)
+        check('render_year shows Live', '实况 1' in year_html)
+        check('render_year keeps photos/videos', '照片 2｜视频 1' in year_html)
 
         home_html = wb.render_home(work).decode('utf-8')
-        check('render_home year totals include 加星', '2 加星' in home_html)
-        check('render_home year totals include Live', '1 Live' in home_html)
+        check('render_home year totals include 加星', '加星 2' in home_html)
+        check('render_home year totals include Live', '实况 1' in home_html)
 
 
 def test_events_api_edit():
@@ -1536,12 +1536,12 @@ def test_theme_bucket_shows_date_range():
         check('theme bucket shows period label', '周期' in theme_html)
         check(
             'theme bucket shows short date range',
-            '11/1–11/1' in theme_html,
-            detail='expected 11/1–11/1 in page-meta',
+            '11月1日到11月1日' in theme_html,
+            detail='expected 11月1日到11月1日 in page-meta',
         )
         check(
             'theme bucket shows month in period',
-            '2025-11' in theme_html and '周期 2025-11 · 11/1–11/1' in theme_html,
+            '2025-11' in theme_html and '周期：2025-11｜11月1日到11月1日' in theme_html,
         )
 
         default_html = wb.render_bucket(
@@ -1565,7 +1565,7 @@ def test_theme_bucket_shows_date_range():
         ).decode('utf-8')
         check(
             'sources-only theme falls back to month',
-            '<p class="page-meta">周期 2026-08</p>' in sources_html,
+            '<p class="page-meta">周期：2026-08</p>' in sources_html,
         )
         check(
             'sources-only has no date-range short form',
@@ -2074,7 +2074,7 @@ def test_gallery_pagination():
     check('PAGE_JS has /api/gallery', '/api/gallery' in wb.PAGE_JS)
     check(
         'filter tip copy',
-        '筛选仅当前已加载' in wb._gallery_toolbar(1, 0, paginated=True),
+        '先加载更多，再筛选' in wb._gallery_toolbar(1, 0, paginated=True),
     )
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -2098,8 +2098,8 @@ def test_gallery_pagination():
             detail=f'cells={cell_n} page={wb.GALLERY_PAGE_SIZE} total={n}',
         )
         check('screenshots has load more', 'data-load-more' in html and '加载更多' in html)
-        check('screenshots has filter tip', '筛选仅当前已加载' in html)
-        check('screenshots count shows total', f'{n} 个文件' in html)
+        check('screenshots has filter tip', '先加载更多，再筛选' in html)
+        check('screenshots count shows total', f'文件 {n}' in html)
         # list_screenshots sorts by mtime desc → newest (n-1) on page 1; oldest (0) on last page
         check(
             'first page includes newest file',
