@@ -41,6 +41,11 @@ MAX_POST_BODY = 2 * 1024 * 1024  # 2 MiB
 GALLERY_PAGE_SIZE = 150
 GALLERY_PAGE_SIZE_MAX = 500
 MONTH_SEGMENT_RE = re.compile(r'^\d{4}-\d{2}(_[^/\\]+)?$')
+GALLERY_ARCHIVED_TIME_RE = re.compile(
+    r'^(?:screenshot_|screenrecorder_|doc_|things_)?'
+    r'(?P<date>\d{8})_(?P<time>\d{6})(?:_|\.)',
+    re.IGNORECASE,
+)
 # Star bucket names: alnum / . _ - / CJK (theme dirs like 2026-07_海南)
 _STAR_BUCKET_SAFE_RE = re.compile(
     r'^[A-Za-z0-9._\-\u3400-\u9fff\uf900-\ufaff]+$'
@@ -516,6 +521,17 @@ def bucket_month_key(name: str) -> str:
     return name.split('_', 1)[0] if '_' in name else name
 
 
+def bucket_recent_sort_key(path: Path) -> tuple:
+    """Newest month first; within a month, default bucket before themes."""
+    month = bucket_month_key(path.name)
+    if re.fullmatch(r'\d{4}-\d{2}', month):
+        month_rank = -int(month.replace('-', ''))
+    else:
+        month_rank = 0
+    themed_rank = 1 if '_' in path.name else 0
+    return (month_rank, themed_rank, path.name.casefold())
+
+
 def bucket_display_name(name: str) -> str:
     """Short gallery/ledger title: theme name or YYYY-MM (not full folder)."""
     if '_' in name:
@@ -723,6 +739,62 @@ def get_trash_count(work: Path) -> int:
         }
     return int(count)
 
+
+def gallery_file_time_key(path: Path) -> int:
+    """Sortable media time for gallery browsing, newest first.
+
+    Organized PicVault files encode capture/archive time in the filename. Use it
+    first so browsing order is stable even after file copies or metadata mtime
+    changes. Legacy/unmatched names fall back to filesystem mtime.
+    """
+    m = GALLERY_ARCHIVED_TIME_RE.match(path.name)
+    if m:
+        raw = f"{m.group('date')}{m.group('time')}"
+        try:
+            datetime.strptime(raw, '%Y%m%d%H%M%S')
+            return int(raw)
+        except ValueError:
+            pass
+    try:
+        return int(
+            datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y%m%d%H%M%S')
+        )
+    except Exception:
+        return 0
+
+
+def sort_gallery_files(files) -> list[Path]:
+    """Default gallery order: media time descending, deterministic for ties."""
+    return sorted(
+        files,
+        key=lambda f: (gallery_file_time_key(f), f.as_posix().casefold()),
+        reverse=True,
+    )
+
+
+def gallery_file_month_key(path: Path) -> str:
+    """YYYY-MM month key matching gallery media-time order."""
+    raw = f'{gallery_file_time_key(path):014d}'
+    if raw.startswith('0000'):
+        return ''
+    return f'{raw[:4]}-{raw[4:6]}'
+
+
+def gallery_month_label(month_key: str) -> str:
+    m = re.fullmatch(r'(\d{4})-(\d{2})', month_key or '')
+    if not m:
+        return '未知月份'
+    return f'{m.group(1)} 年 {int(m.group(2))} 月'
+
+
+def gallery_month_divider(month_key: str) -> str:
+    label = gallery_month_label(month_key)
+    return (
+        f'<div class="gallery-month" data-gallery-month="{_esc(month_key)}">'
+        f'{_esc(label)}</div>'
+    )
+
+
 def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Path]:
     """List files in a specific month/theme bucket.
 
@@ -738,43 +810,47 @@ def list_bucket(work: Path, year: str, month: str, theme: str = None) -> list[Pa
         if sub.exists():
             files.extend(f for f in sub.rglob('*') if is_user_media_file(f))
     files = [f for f in files if not is_live_companion_mov(f)]
-    return sorted(files)
+    return sort_gallery_files(files)
 
 
 def list_screenshots(work: Path) -> list[Path]:
     screenshots = work / 'screenshots'
     if not screenshots.exists():
         return []
-    return sorted([f for f in screenshots.iterdir() if is_user_media_file(f)],
-                  key=lambda f: f.stat().st_mtime, reverse=True)
+    return sort_gallery_files(
+        f for f in screenshots.iterdir() if is_user_media_file(f)
+    )
 
 
 def list_screenrecords(work: Path) -> list[Path]:
     screenrecords = work / 'screenrecords'
     if not screenrecords.exists():
         return []
-    return sorted([f for f in screenrecords.iterdir() if is_user_media_file(f)],
-                  key=lambda f: f.stat().st_mtime, reverse=True)
+    return sort_gallery_files(
+        f for f in screenrecords.iterdir() if is_user_media_file(f)
+    )
 
 
 def list_docs(work: Path) -> list[Path]:
     docs = work / 'docs'
     if not docs.exists():
         return []
-    return sorted([f for f in docs.iterdir() if is_user_media_file(f)],
-                  key=lambda f: f.stat().st_mtime, reverse=True)
+    return sort_gallery_files(
+        f for f in docs.iterdir() if is_user_media_file(f)
+    )
 
 
 def list_things(work: Path) -> list[Path]:
     things = work / 'things'
     if not things.exists():
         return []
-    return sorted([f for f in things.iterdir() if is_user_media_file(f)],
-                  key=lambda f: f.stat().st_mtime, reverse=True)
+    return sort_gallery_files(
+        f for f in things.iterdir() if is_user_media_file(f)
+    )
 
 
 def list_all_starred(work: Path) -> list[tuple]:
-    """All starred files that still exist: [(Path, bucket_name), ...] by mtime desc."""
+    """All starred files that still exist, by media time descending."""
     stars_dir = work / '_meta' / 'stars'
     if not stars_dir.exists():
         return []
@@ -789,7 +865,10 @@ def list_all_starred(work: Path) -> list[tuple]:
             if full.is_file():
                 items.append((full, bucket, rel))
                 seen.add(rel)
-    items.sort(key=lambda t: t[0].stat().st_mtime, reverse=True)
+    items.sort(
+        key=lambda t: (gallery_file_time_key(t[0]), t[0].as_posix().casefold()),
+        reverse=True,
+    )
     return items
 
 
@@ -1397,6 +1476,24 @@ body.select-mode .toolbar-organize { display: flex; }
   margin: 0;
   letter-spacing: 0.02em;
 }
+.gallery-month {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 2px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.gallery-month::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+.gallery-month.hidden { display: none; }
 .btn-more {
   font-family: var(--sans);
   font-weight: 500;
@@ -1411,6 +1508,31 @@ body.select-mode .toolbar-organize { display: flex; }
 }
 .btn-more:hover { background: var(--paper); border-color: var(--ink); }
 .btn-more.busy { opacity: 0.45; pointer-events: none; }
+.back-top {
+  position: fixed;
+  right: clamp(18px, 4vw, 44px);
+  bottom: clamp(18px, 4vw, 38px);
+  z-index: 30;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity .16s ease, transform .16s ease, border-color .12s ease;
+  box-shadow: 0 10px 30px rgba(20,20,20,0.08);
+}
+.back-top.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.back-top:hover,
+.back-top:focus-visible { border-color: var(--ink); }
 
 .ledger {
   border-top: 1px solid var(--line);
@@ -1731,6 +1853,7 @@ body.select-mode .cell .fname {
 }
 
 .lb {
+  --lb-bar-safe: 118px;
   display: flex;
   position: fixed;
   inset: 0;
@@ -1744,6 +1867,14 @@ body.select-mode .cell .fname {
   pointer-events: none;
   transition: opacity 0.35s ease, visibility 0.35s ease;
 }
+.lb-media {
+  position: absolute;
+  inset: 0 0 var(--lb-bar-safe) 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  box-sizing: border-box;
+}
 .lb.open {
   opacity: 1;
   visibility: visible;
@@ -1751,12 +1882,15 @@ body.select-mode .cell .fname {
 }
 .lb img, .lb video {
   max-width: 100vw;
-  max-height: 100vh;
+  max-height: calc(100vh - var(--lb-bar-safe));
   object-fit: contain;
+}
+.lb video {
+  max-width: calc(100vw - 36px);
 }
 .lb-bar {
   position: fixed;
-  bottom: 20px;
+  bottom: max(20px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: grid;
@@ -1828,6 +1962,7 @@ body.select-mode .cell .fname {
 .lb-bar .lb-trash { color: #8f1d1d; }
 .lb-bar .lb-trash.busy { opacity: 0.55; pointer-events: none; }
 @media (max-width: 900px) {
+  .lb { --lb-bar-safe: 184px; }
   .lb-bar { grid-template-columns: 1fr; align-items: stretch; }
   .lb-group { border-left: none; padding-left: 0; flex-wrap: wrap; }
 }
@@ -1986,7 +2121,7 @@ body.select-mode .cell .fname {
   .star.pulse { animation: none; }
   .page-in { animation: none; }
   html { scroll-behavior: auto; }
-  .chip, .btn-reclass, .btn-bulk-star, .btn-trash, .btn-more, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
+  .chip, .btn-reclass, .btn-bulk-star, .btn-trash, .btn-more, .back-top, .ledger-row, .cell, .star, .lb-bar button, .ledger-go, .ledger-key, .ledger-sync { transition: none; }
 }
 
 '''
@@ -2362,6 +2497,7 @@ PAGE_JS = '''
         }
         cell.remove();
       }
+      updateGalleryMonthVisibility();
       syncSelCount();
       toast('已移入回收站：1 个');
       var nextItems = visibleLightboxThumbs();
@@ -2388,6 +2524,22 @@ PAGE_JS = '''
     document.querySelectorAll('.cell').forEach(function (cell) {
       var show = filterMode === 'all' || cell.classList.contains('starred');
       cell.classList.toggle('hidden', !show);
+    });
+    updateGalleryMonthVisibility();
+  }
+
+  function updateGalleryMonthVisibility() {
+    document.querySelectorAll('.gallery-month').forEach(function (month) {
+      var node = month.nextElementSibling;
+      var hasVisibleCell = false;
+      while (node && !node.classList.contains('gallery-month')) {
+        if (node.classList.contains('cell') && !node.classList.contains('hidden')) {
+          hasVisibleCell = true;
+          break;
+        }
+        node = node.nextElementSibling;
+      }
+      month.classList.toggle('hidden', !hasVisibleCell);
     });
   }
 
@@ -2460,6 +2612,28 @@ PAGE_JS = '''
       }, { rootMargin: '240px 0px' });
       galleryIO.observe(more);
     }
+  }
+
+  function setupBackTop() {
+    var btn = document.getElementById('backTopBtn');
+    if (!btn) return;
+    function syncBackTop() {
+      btn.classList.toggle('show', window.scrollY > 480);
+    }
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      var reduce = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+    });
+    window.addEventListener('scroll', syncBackTop, { passive: true });
+    syncBackTop();
+  }
+
+  function setupGalleryEnhancements() {
+    setupGalleryPaging();
+    setupBackTop();
+    updateGalleryMonthVisibility();
   }
 
   document.addEventListener('change', function (e) {
@@ -2684,9 +2858,9 @@ PAGE_JS = '''
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupGalleryPaging);
+    document.addEventListener('DOMContentLoaded', setupGalleryEnhancements);
   } else {
-    setupGalleryPaging();
+    setupGalleryEnhancements();
   }
 })();
 '''
@@ -2938,10 +3112,18 @@ def _empty_state(title: str, text: str, actions: list[tuple[str, str, bool]] = N
 
 
 def _gallery_cells_html(entries: list[tuple], work: Path, thumb_root: Path,
-                        stars: dict, start_index: int = 1) -> str:
+                        stars: dict, start_index: int = 1,
+                        group_by_month: bool = False,
+                        previous_month: str = None) -> str:
     """Render consecutive gallery cells; ``entries`` is [(Path, bucket), ...]."""
     parts = []
+    current_month = previous_month
     for i, (path, bucket) in enumerate(entries):
+        if group_by_month:
+            month_key = gallery_file_month_key(path)
+            if month_key != current_month:
+                parts.append(gallery_month_divider(month_key))
+                current_month = month_key
         parts.append(
             _media_cell(path, work, thumb_root, bucket, stars, start_index + i)
         )
@@ -2971,7 +3153,11 @@ def _gallery_sheet_html(
     page = entries[:GALLERY_PAGE_SIZE]
     loaded = len(page)
     has_more = total > loaded
-    cells = _gallery_cells_html(page, work, thumb_root, stars, start_index=1)
+    large_gallery = total > GALLERY_PAGE_SIZE
+    cells = _gallery_cells_html(
+        page, work, thumb_root, stars, start_index=1,
+        group_by_month=large_gallery,
+    )
     attrs = [
         f'data-gallery-kind="{_esc(kind)}"',
         f'data-offset="{loaded}"',
@@ -2994,9 +3180,16 @@ def _gallery_sheet_html(
             '加载更多</button>'
             '</div>'
         )
+    back_top = ''
+    if large_gallery:
+        back_top = (
+            '<button type="button" class="back-top" id="backTopBtn" '
+            'aria-label="返回顶部">↑ 返回顶部</button>'
+        )
     return (
         f'<div class="sheet" id="sheet" {" ".join(attrs)}>{cells}</div>'
         f'{more}'
+        f'{back_top}'
     )
 
 
@@ -3029,8 +3222,13 @@ def build_gallery_page_payload(
     offset = clamp_gallery_offset(offset, total)
     page = entries[offset:offset + limit]
     stars = gallery_stars_map(work, kind, entries)
+    previous_month = (
+        gallery_file_month_key(entries[offset - 1][0]) if offset > 0 else None
+    )
     html = _gallery_cells_html(
         page, work, thumb_root, stars, start_index=offset + 1,
+        group_by_month=total > GALLERY_PAGE_SIZE,
+        previous_month=previous_month,
     )
     next_offset = offset + len(page)
     return {
@@ -3198,7 +3396,10 @@ def render_year(work: Path, year: str) -> bytes:
             crumbs=[('首页', '/'), ('按日期', '/by-date'), (year, f'/y/{year}')],
         )
 
-    months = [m for m in sorted(by_date.iterdir()) if m.is_dir()]
+    months = sorted(
+        [m for m in by_date.iterdir() if m.is_dir()],
+        key=bucket_recent_sort_key,
+    )
     filled_rows = []
     empty_rows = []
     for m in months:

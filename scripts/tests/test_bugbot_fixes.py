@@ -2684,6 +2684,151 @@ def test_gallery_pagination():
             httpd.shutdown()
 
 
+def test_gallery_default_sort_by_capture_time_desc():
+    """Gallery browsing defaults to newest captured/archived time first, not filesystem mtime."""
+    print('\n29. Gallery default sort by capture time desc')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        shots = work / 'screenshots'
+        shots.mkdir(parents=True)
+        shot_names = [
+            'screenshot_20260710_120000_aaa111.jpg',
+            'screenshot_20260712_120000_aaa222.jpg',
+            'screenshot_20260711_120000_aaa333.jpg',
+        ]
+        for idx, name in enumerate(shot_names):
+            path = shots / name
+            path.write_bytes(b'x')
+            # Deliberately oppose mtime order so filename/capture time must win.
+            os.utime(path, (1_700_000_000 + idx, 1_700_000_000 + idx))
+        check(
+            'screenshots sort by capture time desc',
+            [p.name for p in wb.list_screenshots(work)] == [
+                'screenshot_20260712_120000_aaa222.jpg',
+                'screenshot_20260711_120000_aaa333.jpg',
+                'screenshot_20260710_120000_aaa111.jpg',
+            ],
+        )
+
+        photos = work / 'by-date' / '2026' / '2026-07' / 'photos'
+        photos.mkdir(parents=True)
+        photo_names = [
+            '20260701_120000_aaa111.jpg',
+            '20260703_120000_aaa333.jpg',
+            '20260702_120000_aaa222.jpg',
+        ]
+        for idx, name in enumerate(photo_names):
+            path = photos / name
+            path.write_bytes(b'p')
+            os.utime(path, (1_800_000_000 - idx, 1_800_000_000 - idx))
+        check(
+            'bucket sort by capture time desc',
+            [p.name for p in wb.list_bucket(work, '2026', '2026-07')] == [
+                '20260703_120000_aaa333.jpg',
+                '20260702_120000_aaa222.jpg',
+                '20260701_120000_aaa111.jpg',
+            ],
+        )
+
+        stars_dir = work / '_meta' / 'stars'
+        stars_dir.mkdir(parents=True)
+        (stars_dir / 'screenshots.json').write_text(
+            json.dumps({str((shots / shot_names[0]).relative_to(work)): True}),
+            encoding='utf-8',
+        )
+        (stars_dir / '2026-07.json').write_text(
+            json.dumps({str((photos / photo_names[1]).relative_to(work)): True}),
+            encoding='utf-8',
+        )
+        check(
+            'starred sort by capture time desc across buckets',
+            [p.name for p, _bucket, _rel in wb.list_all_starred(work)] == [
+                'screenshot_20260710_120000_aaa111.jpg',
+                '20260703_120000_aaa333.jpg',
+            ],
+        )
+
+
+def test_large_gallery_month_groups_and_back_top():
+    """Large galleries get month dividers + top shortcut; small/empty galleries stay quiet."""
+    print('\n30. Large gallery month groups and back-to-top')
+
+    check('PAGE_JS sets up back top', 'function setupBackTop' in wb.PAGE_JS)
+    check('PAGE_JS toggles back top visibility', "classList.toggle('show'" in wb.PAGE_JS)
+    check('PAGE_JS updates month visibility', 'function updateGalleryMonthVisibility' in wb.PAGE_JS)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'work'
+        thumbs = work / '_meta' / 'thumbs'
+        shots = work / 'screenshots'
+        thumbs.mkdir(parents=True)
+        shots.mkdir(parents=True)
+
+        # 155 July files plus 2 June files: page 2 continues July, then crosses to June.
+        for i in range(wb.GALLERY_PAGE_SIZE + 5):
+            minute = i // 60
+            second = i % 60
+            name = f'screenshot_20260715_12{minute:02d}{second:02d}_{i:04x}.jpg'
+            (shots / name).write_bytes(b'j')
+        for i in range(2):
+            name = f'screenshot_202606{30 - i:02d}_120000_jun{i:04x}.jpg'
+            (shots / name).write_bytes(b'k')
+
+        html = wb.render_screenshots(work, thumbs).decode('utf-8')
+        check('large gallery has month divider', 'class="gallery-month"' in html)
+        check('large gallery shows July divider', '2026 年 7 月' in html)
+        check('large gallery first page omits unloaded June divider', '2026 年 6 月' not in html)
+        check('large gallery has back top button', 'id="backTopBtn"' in html and '返回顶部' in html)
+
+        page2 = wb.build_gallery_page_payload(
+            work, thumbs, 'screenshots', offset=wb.GALLERY_PAGE_SIZE,
+            limit=wb.GALLERY_PAGE_SIZE,
+        )
+        page2_html = page2.get('html') or ''
+        check('api page 2 ok', page2.get('ok') is True)
+        check('api page 2 does not repeat July divider', '2026 年 7 月' not in page2_html)
+        check('api page 2 inserts June divider', '2026 年 6 月' in page2_html)
+
+        small = work / 'things'
+        small.mkdir(parents=True)
+        (small / 'things_20260715_120000_small.jpg').write_bytes(b's')
+        small_html = wb.render_things(work, thumbs).decode('utf-8')
+        check('small gallery has no month divider', 'class="gallery-month"' not in small_html)
+        check('small gallery has no back top', 'id="backTopBtn"' not in small_html)
+
+        empty_html = wb.render_docs(work, thumbs).decode('utf-8')
+        check('empty gallery has no month divider', 'class="gallery-month"' not in empty_html)
+        check('empty gallery has no back top', 'id="backTopBtn"' not in empty_html)
+
+        for bucket in ('2026-07', '2026-07_Trip', '2026-06', '2026-08'):
+            (work / 'by-date' / '2026' / bucket / 'photos').mkdir(parents=True)
+        (work / 'by-date' / '2026' / '2026-07' / 'photos' / '20260715_120000_a.jpg').write_bytes(b'a')
+        (work / 'by-date' / '2026' / '2026-07_Trip' / 'photos' / '20260714_120000_b.jpg').write_bytes(b'b')
+        (work / 'by-date' / '2026' / '2026-06' / 'photos' / '20260615_120000_c.jpg').write_bytes(b'c')
+        year_html = wb.render_year(work, '2026').decode('utf-8')
+        default_pos = year_html.find('href="/y/2026/2026-07"')
+        theme_pos = year_html.find('href="/y/2026/2026-07_Trip"')
+        june_pos = year_html.find('href="/y/2026/2026-06"')
+        empty_aug_pos = year_html.find('href="/y/2026/2026-08"')
+        check(
+            'year page sorts months desc with default before theme and empty last',
+            -1 not in (default_pos, theme_pos, june_pos, empty_aug_pos)
+            and default_pos < theme_pos < june_pos < empty_aug_pos,
+            detail=f'{default_pos}, {theme_pos}, {june_pos}, {empty_aug_pos}',
+        )
+
+
+def test_lightbox_video_controls_not_covered_by_action_bar():
+    """Lightbox media keeps clear space above the bottom action bar for video controls."""
+    print('\n31. Lightbox video controls stay clear of action bar')
+
+    check('lightbox has media container style', '.lb-media' in wb.PAGE_CSS)
+    check('lightbox reserves bottom safe space', '--lb-bar-safe' in wb.PAGE_CSS)
+    check('lightbox media max-height uses safe space', 'calc(100vh - var(--lb-bar-safe))' in wb.PAGE_CSS)
+    check('lightbox action bar offset uses safe area', 'env(safe-area-inset-bottom)' in wb.PAGE_CSS)
+
+
 def main():
     print('Bugbot fix regression checks')
     test_dashboard_pipeline_button()
@@ -2728,6 +2873,9 @@ def main():
     test_web_path_traversal_and_cors_hardening()
     test_perf_quick_wins_cache_and_thumb_headers()
     test_gallery_pagination()
+    test_gallery_default_sort_by_capture_time_desc()
+    test_large_gallery_month_groups_and_back_top()
+    test_lightbox_video_controls_not_covered_by_action_bar()
     print(f'\n{passed} passed, {failed} failed')
     sys.exit(1 if failed else 0)
 
