@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -117,6 +118,74 @@ def test_picvault_web_port_state():
         check('picvault status uses web.port', 'http://localhost:8777/' in (status.stdout + status.stderr))
         check('picvault web status uses web.port', 'http://localhost:8777/' in (web_status.stdout + web_status.stderr))
         check('picvault web no action prints usage', no_action.returncode != 0 and 'Usage: picvault web' in (no_action.stdout + no_action.stderr))
+
+
+def test_picvault_web_restart_clears_orphan_same_work_server():
+    print('\n1e. picvault web restart clears same-WORK orphan server')
+    allowed_tmp_root = Path('/Users/ym/Downloads/pic-test')
+    allowed_tmp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(allowed_tmp_root)) as tmp:
+        work = Path(tmp) / 'work'
+        meta = work / '_meta'
+        (meta / 'logs').mkdir(parents=True)
+        (meta / 'thumbs').mkdir(parents=True)
+        (work / 'by-date').mkdir()
+        (work / 'screenshots').mkdir()
+        (work / 'screenrecords').mkdir()
+        (work / 'docs').mkdir()
+        (work / 'things').mkdir()
+        (work / 'inbox').mkdir()
+        (work / '_trash').mkdir()
+
+        sock = __import__('socket').socket()
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        orphan = subprocess.Popen(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / 'scripts' / 'web_browse.py'),
+                '--work', str(work), '--host', '127.0.0.1', '--port', str(port),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        env = {**os.environ, 'WORK': str(work), 'PICVAULT_TEST': '1'}
+        try:
+            for _ in range(30):
+                probe = subprocess.run(
+                    [str(PICVAULT), 'web', 'status', '--port', str(port)],
+                    env=env, capture_output=True, text=True,
+                )
+                if orphan.poll() is None:
+                    break
+                time.sleep(0.1)
+            if orphan.poll() is not None:
+                check('orphan fixture started', False, detail=f'exit={orphan.returncode}')
+                return
+
+            restart = subprocess.run(
+                [str(PICVAULT), 'web', 'restart', '--port', str(port)],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            out = restart.stdout + restart.stderr
+            check('restart succeeds with orphan listener', restart.returncode == 0, detail=out)
+            check('restart wrote pid file', (meta / 'web.pid').is_file())
+            check('new server is running', 'Web UI started' in out, detail=out)
+        finally:
+            pid_file = meta / 'web.pid'
+            if pid_file.is_file():
+                subprocess.run(
+                    [str(PICVAULT), 'web', 'stop'], env=env,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            if orphan.poll() is None:
+                orphan.terminate()
+                try:
+                    orphan.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    orphan.kill()
 
 
 def test_console_link_shows_dashboard_url():
@@ -2332,6 +2401,7 @@ def main():
     test_dashboard_web_start_copy()
     test_gallery_menu_counts_and_dismissal()
     test_picvault_web_port_state()
+    test_picvault_web_restart_clears_orphan_same_work_server()
     test_console_link_shows_dashboard_url()
     test_init_skeleton()
     test_run_commands_backup_and_pipeline()
