@@ -1109,7 +1109,7 @@ a { color: var(--ink); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 :focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
 
-.wrap { width: min(100%, 1120px); margin: 0 auto; padding: 28px clamp(22px, 2.6vw, 32px) 72px; }
+.wrap { width: min(100%, 1360px); margin: 0 auto; padding: 28px clamp(22px, 2.6vw, 32px) 72px; }
 
 .brand-mark {
   font-family: var(--sans);
@@ -1339,9 +1339,9 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 18px;
-  padding: 10px 0 12px;
+  gap: 6px 10px;
+  margin-bottom: 16px;
+  padding: 6px 0 7px;
   background: var(--paper);
   border: none;
   border-bottom: 1px solid var(--line);
@@ -1353,8 +1353,8 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .toolbar-main {
   display: flex;
   align-items: center;
-  margin-right: auto;
-  min-width: 12rem;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .toolbar-title {
   font-family: var(--sans);
@@ -1362,10 +1362,20 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   font-weight: 600;
   color: var(--ink);
   letter-spacing: -0.025em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .toolbar-filters {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+.toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
   gap: 4px;
   align-items: center;
 }
@@ -1447,13 +1457,12 @@ body.select-mode .toolbar-organize { display: flex; }
   color: var(--ink);
   min-width: 4.5em;
 }
-.toolbar .review-tip {
+.review-tip {
   font-size: var(--text-xs);
   color: var(--muted);
-  width: 100%;
-  margin: 2px 0 0;
+  margin: -8px 0 14px;
 }
-.toolbar .review-tip kbd {
+.review-tip kbd {
   font-family: var(--mono);
   font-size: 0.7rem;
   border: 1px solid var(--line);
@@ -1479,12 +1488,26 @@ body.select-mode .toolbar-organize { display: flex; }
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 22px 0 2px;
+  position: relative;
+  margin: 24px 0 4px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
   font-family: var(--sans);
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--ink);
   letter-spacing: -0.02em;
+}
+.gallery-month::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  transform: translateY(-50%);
 }
 .gallery-month::after {
   content: '';
@@ -1677,8 +1700,8 @@ body.select-mode .toolbar-organize { display: flex; }
 
 .sheet {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 14px 14px;
 }
 .cell {
   position: relative;
@@ -2088,6 +2111,20 @@ body.select-mode .cell .fname {
   .ledger-sub { grid-column: 1 / -1; }
   .ledger-stats { text-align: left; white-space: normal; }
   .ledger-go { grid-row: 1; grid-column: 2; }
+  .toolbar { gap: 4px 6px; margin-bottom: 14px; padding: 6px 0; }
+  .toolbar-main { flex: 1 1 100%; }
+  .toolbar-filters {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .toolbar-filters::-webkit-scrollbar { display: none; }
+  .toolbar-actions { flex: 0 0 auto; }
+  .toolbar-organize { gap: 6px; overflow-x: auto; flex-wrap: nowrap; }
+  .review-tip { margin: -6px 0 12px; }
   .sheet { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px 14px; }
   .star { opacity: 0.92; }
 }
@@ -2484,6 +2521,7 @@ PAGE_JS = '''
   }
 
   var filterMode = 'all';
+  var starredFilterHintShown = false;
   var galleryIO = null;
   function galleryAutoLoadAllowed() {
     // 「仅加星」会把未加星格子 display:none，#galleryMore 常留在视口内，
@@ -2674,6 +2712,11 @@ PAGE_JS = '''
     var chip = e.target.closest('[data-filter]');
     if (chip) {
       filterMode = chip.getAttribute('data-filter');
+      var sheet = gallerySheet();
+      if (filterMode === 'starred' && sheet && sheet.getAttribute('data-has-more') === '1' && !starredFilterHintShown) {
+        starredFilterHintShown = true;
+        toast('仅筛选已加载内容；继续加载后会包含更多加星。');
+      }
       document.querySelectorAll('[data-filter]').forEach(function (c) {
         c.classList.toggle('on', c === chip);
       });
@@ -3039,13 +3082,9 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
     if paginated:
         back_top = (
             '<button type="button" class="chip back-top" id="backTopBtn">'
-            '↑ 返回顶部</button>'
+            '↑ 顶部</button>'
         )
-    review_tip = (
-        '<p class="review-tip">打开预览后按 <kbd>空格</kbd> 勾选当前并进入下一张；'
-        '加星、原图和删除仍可单独操作。</p>'
-        if file_count else ''
-    )
+    toolbar_actions = f'<div class="toolbar-actions">{back_top}</div>' if back_top else ''
     title_html = _esc(title or '图库')
     return (
         f'<div class="toolbar">'
@@ -3058,14 +3097,22 @@ def _gallery_toolbar(file_count: int, star_count: int, context: str = 'normal',
         f'{star_filter}'
         f'<button type="button" class="chip" id="selectModeBtn" data-select-toggle '
         f'aria-pressed="false">批量选择</button>'
-        f'{back_top}'
         f'</div>'
+        f'{toolbar_actions}'
         f'<div class="toolbar-organize" aria-label="整理">'
         f'<span class="sel-count" id="selCount"></span>'
         f'{"".join(actions)}'
         f'</div>'
-        f'{review_tip}'
         f'</div>'
+    )
+
+
+def _gallery_review_hint(file_count: int) -> str:
+    if not file_count:
+        return ''
+    return (
+        '<p class="review-tip">打开预览后按 <kbd>空格</kbd> 勾选当前并进入下一张；'
+        '加星、原图和删除仍可单独操作。</p>'
     )
 
 
@@ -3496,6 +3543,7 @@ def render_bucket(work: Path, year: str, month: str, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">{_esc(display)}</h2>'
         f'<p class="page-meta">{_esc(meta)}</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(stars), context=gallery_ctx, paginated=paginated, title=display)}'
         f'{sheet}'
     )
@@ -3527,6 +3575,7 @@ def render_screenshots(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">截图</h2>'
         f'<p class="page-meta">截图单独分出，适合快速清理和复核。</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated, title="截图")}'
         f'{sheet}'
     )
@@ -3553,6 +3602,7 @@ def render_screenrecords(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">录屏</h2>'
         f'<p class="page-meta">录屏集中在这里，方便回看和清理。</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(stars), context="screen", paginated=paginated, title="录屏")}'
         f'{sheet}'
     )
@@ -3579,6 +3629,7 @@ def render_docs(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">文档</h2>'
         f'<p class="page-meta">证件、票据和纸面信息，从图库手动移入。</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(stars), context="docs", paginated=paginated, title="文档")}'
         f'{sheet}'
     )
@@ -3605,6 +3656,7 @@ def render_things(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">物品</h2>'
         f'<p class="page-meta">设备、包装和物件记录，从图库手动移入。</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(stars), context="things", paginated=paginated, title="物品")}'
         f'{sheet}'
     )
@@ -3632,6 +3684,7 @@ def render_starred(work: Path, thumb_root: Path) -> bytes:
         f'<h2 class="page-title">加星</h2>'
         f'<p class="page-meta">已加星 {len(entries)} 个，汇总所有桶里的精选。</p>'
         f'</div>'
+        f'{_gallery_review_hint(len(entries))}'
         f'{_gallery_toolbar(len(entries), len(entries), context="starred", paginated=paginated, title="加星")}'
         f'{sheet}'
     )

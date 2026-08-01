@@ -2779,7 +2779,7 @@ def test_large_gallery_month_groups_and_back_top():
         check('large gallery has month divider', 'class="gallery-month"' in html)
         check('large gallery shows July divider', '2026 年 7 月' in html)
         check('large gallery first page omits unloaded June divider', '2026 年 6 月' not in html)
-        check('large gallery has back top button', 'id="backTopBtn"' in html and '返回顶部' in html)
+        check('large gallery has back top button', 'id="backTopBtn"' in html and '↑ 顶部' in html)
         check(
             'back top lives in sticky toolbar',
             '<div class="toolbar">' in html
@@ -2858,12 +2858,24 @@ def test_sticky_gallery_toolbar_title_stats_and_top_action():
         check('toolbar keeps star count in starred chip', '仅加星<span class="n" id="starCount">0</span>' in html)
         check('toolbar has no left stats block', 'toolbar-meta' not in html and 'pageMetaStars' not in html)
         check(
-            'toolbar has inline back top button',
-            'class="chip back-top"' in html and toolbar_pos < back_top_pos < sheet_pos,
+            'toolbar has grouped back top action',
+            'class="toolbar-actions"' in html
+            and '<button type="button" class="chip back-top" id="backTopBtn">↑ 顶部</button>' in html
+            and toolbar_pos < back_top_pos < sheet_pos,
             detail=f'{toolbar_pos}, {back_top_pos}, {sheet_pos}',
         )
+        check('toolbar separates filters and actions', html.find('toolbar-filters') < html.find('toolbar-actions') < html.find('toolbar-organize'))
         check('toolbar no longer shows paging filter tip', '先加载更多，再筛选' not in html)
         check('toolbar no longer uses old count block', 'class="count"' not in html)
+        check('review hint is outside sticky toolbar', 'toolbar"><p class="review-tip"' not in html and '<p class="review-tip">打开预览后按' in html)
+
+    check('desktop layout is wider for dense galleries', '.wrap { width: min(100%, 1360px);' in wb.PAGE_CSS)
+    check('desktop gallery uses denser thumbnail columns', 'repeat(auto-fill, minmax(184px, 1fr))' in wb.PAGE_CSS)
+    check('sticky toolbar is vertically compact', 'padding: 6px 0 7px;' in wb.PAGE_CSS)
+    check('toolbar has actions group css', '.toolbar-actions {' in wb.PAGE_CSS)
+    check('mobile filters scroll horizontally', '.toolbar-filters {' in wb.PAGE_CSS and 'overflow-x: auto;' in wb.PAGE_CSS)
+    check('month dividers have timeline tick', '.gallery-month::before' in wb.PAGE_CSS and 'border-left: 1px solid var(--line);' in wb.PAGE_CSS)
+    check('starred filter has one-time loaded-only toast', 'starredFilterHintShown' in wb.PAGE_JS and '仅筛选已加载内容' in wb.PAGE_JS)
 
 
 def test_lightbox_blank_area_click_closes_preview():
