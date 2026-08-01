@@ -791,7 +791,10 @@ def gallery_month_divider(month_key: str) -> str:
     label = gallery_month_label(month_key)
     return (
         f'<div class="gallery-month" data-gallery-month="{_esc(month_key)}">'
-        f'{_esc(label)}</div>'
+        f'<span class="gallery-month-label">{_esc(label)}</span>'
+        f'<button type="button" class="month-pick" '
+        f'data-select-month="{_esc(month_key)}">勾选本月</button>'
+        f'</div>'
     )
 
 
@@ -1515,6 +1518,30 @@ body.select-mode .toolbar-organize { display: flex; }
   border-top: 1px solid var(--line);
 }
 .gallery-month.hidden { display: none; }
+.gallery-month-label { white-space: nowrap; }
+.month-pick {
+  display: none;
+  align-items: center;
+  height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+body.select-mode .month-pick { display: inline-flex; }
+.month-pick:hover,
+.month-pick:focus-visible {
+  color: var(--ink);
+  border-color: #C9C5B8;
+  background: var(--mist);
+}
 .btn-more {
   font-family: var(--sans);
   font-weight: 500;
@@ -2301,6 +2328,38 @@ PAGE_JS = '''
     return true;
   }
 
+  function cellsInGalleryMonth(monthNode) {
+    var cells = [];
+    var node = monthNode ? monthNode.nextElementSibling : null;
+    while (node && !node.classList.contains('gallery-month')) {
+      if (node.classList.contains('cell') && !node.classList.contains('hidden')) {
+        cells.push(node);
+      }
+      node = node.nextElementSibling;
+    }
+    return cells;
+  }
+
+  function pickGalleryMonth(button) {
+    var monthNode = button ? button.closest('.gallery-month') : null;
+    var cells = cellsInGalleryMonth(monthNode);
+    if (!cells.length) {
+      toast('本月没有可勾选内容');
+      return;
+    }
+    if (!document.body.classList.contains('select-mode')) setSelectMode(true);
+    var added = 0;
+    cells.forEach(function (cell) {
+      var pick = cell.querySelector('.pick');
+      if (!pick) return;
+      if (!pick.checked) added += 1;
+      pick.checked = true;
+      cell.classList.add('selected');
+    });
+    syncSelCount();
+    toast(added ? ('已勾选本月：' + cells.length + ' 个') : '本月已全部勾选');
+  }
+
   function currentLightboxPath() {
     if (!lb || !lb.classList.contains('open')) return '';
     return lb.getAttribute('data-current-path') || '';
@@ -2672,6 +2731,13 @@ PAGE_JS = '''
     if (e.target.closest('[data-select-toggle]')) {
       e.preventDefault();
       setSelectMode(!document.body.classList.contains('select-mode'));
+      return;
+    }
+    var monthPick = e.target.closest('[data-select-month]');
+    if (monthPick) {
+      e.preventDefault();
+      e.stopPropagation();
+      pickGalleryMonth(monthPick);
       return;
     }
     if (e.target.closest('.pick')) {

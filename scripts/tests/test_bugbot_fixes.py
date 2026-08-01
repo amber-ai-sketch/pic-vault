@@ -2757,6 +2757,8 @@ def test_large_gallery_month_groups_and_back_top():
     check('PAGE_JS sets up back top', 'function setupBackTop' in wb.PAGE_JS)
     check('PAGE_JS scrolls to top', 'window.scrollTo({ top: 0' in wb.PAGE_JS)
     check('PAGE_JS updates month visibility', 'function updateGalleryMonthVisibility' in wb.PAGE_JS)
+    check('PAGE_JS can select a whole month group', 'function pickGalleryMonth' in wb.PAGE_JS)
+    check('month select button handled by click delegate', 'data-select-month' in wb.PAGE_JS)
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'
@@ -2777,6 +2779,7 @@ def test_large_gallery_month_groups_and_back_top():
 
         html = wb.render_screenshots(work, thumbs).decode('utf-8')
         check('large gallery has month divider', 'class="gallery-month"' in html)
+        check('month divider has batch select action', 'data-select-month="2026-07"' in html and '勾选本月' in html)
         check('large gallery shows July divider', '2026 年 7 月' in html)
         check('large gallery first page omits unloaded June divider', '2026 年 6 月' not in html)
         check('large gallery has back top button', 'id="backTopBtn"' in html and '↑ 顶部' in html)
