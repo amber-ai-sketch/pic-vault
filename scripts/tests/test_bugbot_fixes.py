@@ -2759,6 +2759,9 @@ def test_large_gallery_month_groups_and_back_top():
     check('PAGE_JS updates month visibility', 'function updateGalleryMonthVisibility' in wb.PAGE_JS)
     check('PAGE_JS can select a whole month group', 'function pickGalleryMonth' in wb.PAGE_JS)
     check('month select button handled by click delegate', 'data-select-month' in wb.PAGE_JS)
+    check('month select detects loaded month boundary', 'function galleryMonthHasFollowingDivider' in wb.PAGE_JS)
+    check('month select loads until whole month is present', 'function ensureGalleryMonthLoaded' in wb.PAGE_JS and 'await ensureGalleryMonthLoaded(monthNode)' in wb.PAGE_JS)
+    check('load more reports whether it appended content', 'return true;' in wb.PAGE_JS and 'return false;' in wb.PAGE_JS)
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / 'work'

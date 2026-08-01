@@ -1542,6 +1542,7 @@ body.select-mode .month-pick { display: inline-flex; }
   border-color: #C9C5B8;
   background: var(--mist);
 }
+.month-pick.busy { opacity: 0.5; pointer-events: none; }
 .btn-more {
   font-family: var(--sans);
   font-weight: 500;
@@ -2340,11 +2341,34 @@ PAGE_JS = '''
     return cells;
   }
 
-  function pickGalleryMonth(button) {
+  function galleryMonthHasFollowingDivider(monthNode) {
+    var node = monthNode ? monthNode.nextElementSibling : null;
+    while (node) {
+      if (node.classList.contains('gallery-month')) return true;
+      node = node.nextElementSibling;
+    }
+    return false;
+  }
+
+  async function ensureGalleryMonthLoaded(monthNode) {
+    var sheet = gallerySheet();
+    while (sheet && sheet.getAttribute('data-has-more') === '1' && !galleryMonthHasFollowingDivider(monthNode)) {
+      var before = parseInt(sheet.getAttribute('data-offset') || '0', 10) || 0;
+      var loaded = await loadMoreGallery();
+      var after = parseInt(sheet.getAttribute('data-offset') || '0', 10) || 0;
+      if (!loaded || after <= before) break;
+    }
+  }
+
+  async function pickGalleryMonth(button) {
     var monthNode = button ? button.closest('.gallery-month') : null;
+    if (button && button.classList.contains('busy')) return;
+    if (button) button.classList.add('busy');
+    await ensureGalleryMonthLoaded(monthNode);
     var cells = cellsInGalleryMonth(monthNode);
     if (!cells.length) {
       toast('本月没有可勾选内容');
+      if (button) button.classList.remove('busy');
       return;
     }
     if (!document.body.classList.contains('select-mode')) setSelectMode(true);
@@ -2357,6 +2381,7 @@ PAGE_JS = '''
       cell.classList.add('selected');
     });
     syncSelCount();
+    if (button) button.classList.remove('busy');
     toast(added ? ('已勾选本月：' + cells.length + ' 个') : '本月已全部勾选');
   }
 
@@ -2613,7 +2638,7 @@ PAGE_JS = '''
   var galleryLoading = false;
   async function loadMoreGallery() {
     var sheet = gallerySheet();
-    if (!sheet || sheet.getAttribute('data-has-more') !== '1' || galleryLoading) return;
+    if (!sheet || sheet.getAttribute('data-has-more') !== '1' || galleryLoading) return false;
     var btn = document.getElementById('loadMoreBtn');
     galleryLoading = true;
     if (btn) btn.classList.add('busy');
@@ -2633,7 +2658,7 @@ PAGE_JS = '''
       var data = await r.json();
       if (!data.ok) {
         toast('加载失败：' + (data.error || 'unknown'));
-        return;
+        return false;
       }
       if (data.html) sheet.insertAdjacentHTML('beforeend', data.html);
       var next = data.next_offset != null ? data.next_offset : (offset + (data.count || 0));
@@ -2658,8 +2683,10 @@ PAGE_JS = '''
         }
       }
       applyFilter();
+      return true;
     } catch (err) {
       toast('网络错误：' + err);
+      return false;
     } finally {
       galleryLoading = false;
       if (btn) btn.classList.remove('busy');
